@@ -1,0 +1,833 @@
+import Database from 'better-sqlite3'
+import { CREATE_TABLES, MIGRATIONS, SCHEMA_VERSION } from './schema'
+import type { ProjectMeta, AIOPositionRow, AIODomainPivotRow, ProjectStats, KeywordRow, TopicRow, TopicKeywordRow, ContentSourceRow } from '../../types'
+import type { ClusterInput, Cluster } from '../topics/cluster'
+
+let _db: Database.Database | null = null
+
+export function getDB(): Database.Database {
+  if (!_db) throw new Error('No project open')
+  return _db
+}
+
+// ─── Open or create a project DB ─────────────────────────────────────────────
+
+export function openProject(filePath: string): ProjectMeta {
+  if (_db) _db.close()
+
+  _db = new Database(filePath)
+  _db.exec(CREATE_TABLES)
+  runMigrations(_db)
+
+  const row = _db.prepare('SELECT * FROM project LIMIT 1').get() as any
+  if (!row) throw new Error('Project file has no project row — may be corrupt')
+
+  return rowToProjectMeta(row)
+}
+
+export function createProject(filePath: string, name: string): ProjectMeta {
+  if (_db) _db.close()
+
+  _db = new Database(filePath)
+  _db.exec(CREATE_TABLES)
+
+  _db.prepare(`
+    INSERT INTO _meta (key, value) VALUES ('schema_version', ?)
+  `).run(String(SCHEMA_VERSION))
+
+  _db.prepare(`
+    INSERT INTO project (name, created_at) VALUES (?, ?)
+  `).run(name, Date.now())
+
+  const row = _db.prepare('SELECT * FROM project LIMIT 1').get() as any
+  return rowToProjectMeta(row)
+}
+
+export function closeProject(): void {
+  _db?.close()
+  _db = null
+}
+
+// ─── Migrations ───────────────────────────────────────────────────────────────
+
+function runMigrations(db: Database.Database): void {
+  const versionRow = db.prepare(`SELECT value FROM _meta WHERE key='schema_version'`).get() as any
+  let current = versionRow ? parseInt(versionRow.value, 10) : 1
+
+  while (current < SCHEMA_VERSION) {
+    const next = current + 1
+    const sql = MIGRATIONS[next]
+    if (sql) db.exec(sql)
+    db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(String(next))
+    current = next
+  }
+}
+
+// ─── Project settings ─────────────────────────────────────────────────────────
+
+export function updateProjectSettings(settings: Partial<ProjectMeta>): void {
+  const db = getDB()
+  const fields: string[] = []
+  const values: unknown[] = []
+
+  const colMap: Record<string, string> = {
+    name: 'name',
+    dfsApiKey: 'dfs_api_key',
+    dfsLogin: 'dfs_login',
+    dfsPassword: 'dfs_password',
+    locationCode: 'location_code',
+    languageCode: 'language_code',
+    device: 'device',
+    fanOutDepth: 'fan_out_depth',
+    fanOutCap: 'fan_out_cap',
+    exclusionKeywords: 'exclusion_keywords'
+  }
+
+  for (const [key, col] of Object.entries(colMap)) {
+    if (key in settings) {
+      fields.push(`${col} = ?`)
+      const val = settings[key as keyof ProjectMeta]
+      values.push(Array.isArray(val) ? JSON.stringify(val) : val)
+    }
+  }
+
+  if (fields.length === 0) return
+  db.prepare(`UPDATE project SET ${fields.join(', ')} WHERE id = 1`).run(...values)
+}
+
+export function getProjectMeta(): ProjectMeta {
+  const row = getDB().prepare('SELECT * FROM project LIMIT 1').get() as any
+  return rowToProjectMeta(row)
+}
+
+function rowToProjectMeta(row: any): ProjectMeta {
+  const dfsLogin    = row.dfs_login ?? ''
+  const dfsPassword = row.dfs_password ?? ''
+  // Derive apiKey from legacy login/password if not stored directly
+  const dfsApiKey   = row.dfs_api_key || (dfsLogin && dfsPassword ? btoa(`${dfsLogin}:${dfsPassword}`) : '')
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    dfsApiKey,
+    dfsLogin,
+    dfsPassword,
+    locationCode: row.location_code ?? 2840,
+    languageCode: row.language_code ?? 'en',
+    device: row.device ?? 'desktop',
+    fanOutDepth: row.fan_out_depth ?? 2,
+    fanOutCap: row.fan_out_cap ?? 5,
+    exclusionKeywords: JSON.parse(row.exclusion_keywords ?? '[]')
+  }
+}
+
+// ─── Keyword management ───────────────────────────────────────────────────────
+
+export function insertRootKeywords(keywords: string[]): number {
+  const db = getDB()
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO keywords (keyword, depth, status)
+    VALUES (?, 0, 'pending')
+  `)
+  const tx = db.transaction((kws: string[]) => {
+    let count = 0
+    for (const kw of kws) {
+      const info = insert.run(kw.toLowerCase().trim())
+      count += info.changes
+    }
+    return count
+  })
+  return tx(keywords) as number
+}
+
+export function getPendingKeywords(): { id: number; keyword: string; depth: number }[] {
+  return getDB()
+    .prepare(`SELECT id, keyword, depth FROM keywords WHERE status = 'pending'`)
+    .all() as { id: number; keyword: string; depth: number }[]
+}
+
+export function markKeywordQueued(id: number): void {
+  getDB().prepare(`UPDATE keywords SET status='queued', queued_at=? WHERE id=?`).run(Date.now(), id)
+}
+
+export function markKeywordRunning(id: number): void {
+  getDB()
+    .prepare(`UPDATE keywords SET status='running', started_at=? WHERE id=?`)
+    .run(Date.now(), id)
+}
+
+export function markKeywordDone(id: number): void {
+  getDB().prepare(`UPDATE keywords SET status='done', done_at=? WHERE id=?`).run(Date.now(), id)
+}
+
+export function markKeywordError(id: number, msg: string): void {
+  getDB()
+    .prepare(`UPDATE keywords SET status='error', error_msg=?, done_at=? WHERE id=?`)
+    .run(msg, Date.now(), id)
+}
+
+export function getKeyword(id: number): { id: number; keyword: string; depth: number } {
+  return getDB().prepare(`SELECT id, keyword, depth FROM keywords WHERE id=?`).get(id) as {
+    id: number
+    keyword: string
+    depth: number
+  }
+}
+
+export function getKeywordRows(limit = 500, offset = 0): KeywordRow[] {
+  return getDB()
+    .prepare(
+      `SELECT
+        k.id, k.keyword, k.depth, k.status, k.parent_id as parentId,
+        k.done_at as doneAt, k.error_msg as errorMsg,
+        COUNT(a.id) as aioSourceCount
+      FROM keywords k
+      LEFT JOIN aio_sources a ON a.keyword_id = k.id
+      GROUP BY k.id
+      ORDER BY k.id
+      LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset) as KeywordRow[]
+}
+
+
+// Returns keywords where the given domain (partial match) appears in AIO sources,
+// with the best (lowest) AIO position that domain achieved for each keyword.
+export function getKeywordsForDomain(domain: string): KeywordRow[] {
+  const like = `%${domain}%`
+  return getDB()
+    .prepare(
+      `SELECT
+        k.id, k.keyword, k.depth, k.status, k.parent_id as parentId,
+        k.done_at as doneAt, k.error_msg as errorMsg,
+        (SELECT COUNT(*) FROM aio_sources WHERE keyword_id = k.id) as aioSourceCount,
+        MIN(a.position) as domainPosition
+      FROM keywords k
+      JOIN aio_sources a ON a.keyword_id = k.id
+        AND (a.domain_root LIKE ? OR a.domain_full LIKE ?)
+      GROUP BY k.id
+      ORDER BY domainPosition ASC
+      LIMIT 2000`
+    )
+    .all(like, like) as KeywordRow[]
+}
+
+// Returns the best AIO position per keyword for a given domain (partial match).
+// Used to build per-domain comparison columns in the keyword table.
+export function getDomainPositions(domain: string): { keywordId: number; position: number }[] {
+  const like = `%${domain}%`
+  return getDB()
+    .prepare(
+      `SELECT keyword_id as keywordId, MIN(position) as position
+       FROM aio_sources
+       WHERE domain_root LIKE ? OR domain_full LIKE ?
+       GROUP BY keyword_id`
+    )
+    .all(like, like) as { keywordId: number; position: number }[]
+}
+
+// Returns distinct domain_root values that partially match the given string.
+// Used for the keyword domain-filter autocomplete.
+export function getDomainSuggestions(partial: string): string[] {
+  const like = `%${partial}%`
+  const rows = getDB()
+    .prepare(
+      `SELECT domain_root as domain, COUNT(*) as cnt
+       FROM aio_sources
+       WHERE domain_root LIKE ?
+       GROUP BY domain_root
+       ORDER BY cnt DESC
+       LIMIT 12`
+    )
+    .all(like) as { domain: string }[]
+  return rows.map((r) => r.domain)
+}
+
+export function getJobCounts() {
+  const rows = getDB()
+    .prepare(`SELECT status, COUNT(*) as cnt FROM keywords GROUP BY status`)
+    .all() as { status: string; cnt: number }[]
+
+  const counts = { pending: 0, queued: 0, running: 0, done: 0, error: 0 }
+  for (const r of rows) {
+    if (r.status in counts) counts[r.status as keyof typeof counts] = r.cnt
+  }
+  return counts
+}
+
+// ─── AIO source management ────────────────────────────────────────────────────
+
+export function insertSerpResult(
+  keywordId: number,
+  resultType: string,
+  rawJson: string
+): void {
+  getDB()
+    .prepare(`INSERT INTO serp_results (keyword_id, result_type, raw_json, fetched_at) VALUES (?,?,?,?)`)
+    .run(keywordId, resultType, rawJson, Date.now())
+}
+
+export function insertAIOSources(
+  keywordId: number,
+  sources: {
+    position: number
+    url: string
+    domainRoot: string
+    domainFull: string
+    aioSnippet: string | null
+    resultType: string
+  }[]
+): void {
+  const db = getDB()
+  const insert = db.prepare(`
+    INSERT INTO aio_sources (keyword_id, position, url, domain_root, domain_full, aio_snippet, result_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+  const tx = db.transaction(() => {
+    for (const s of sources) {
+      insert.run(keywordId, s.position, s.url, s.domainRoot, s.domainFull, s.aioSnippet, s.resultType)
+    }
+  })
+  tx()
+}
+
+export function insertPAAQuestions(
+  keywordId: number,
+  depth: number,
+  questions: { question: string; position: number; aiAnswer: string | null }[]
+): void {
+  const db = getDB()
+  const insert = db.prepare(`
+    INSERT INTO paa_questions (keyword_id, question, position, ai_answer, depth)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  const tx = db.transaction(() => {
+    for (const q of questions) {
+      insert.run(keywordId, q.question, q.position, q.aiAnswer, depth)
+    }
+  })
+  tx()
+}
+
+// Insert child keywords, return IDs of newly inserted ones
+export function insertChildKeywords(
+  children: { keyword: string; source: string }[],
+  parentId: number,
+  parentDepth: number,
+  exclusions: string[]
+): number[] {
+  const db = getDB()
+  const insertKw = db.prepare(`
+    INSERT OR IGNORE INTO keywords (keyword, parent_id, depth, status)
+    VALUES (?, ?, ?, 'pending')
+  `)
+  const insertEdge = db.prepare(`
+    INSERT OR IGNORE INTO fanout_edges (parent_keyword_id, child_keyword_id, source)
+    VALUES (?, ?, ?)
+  `)
+  const getByKw = db.prepare(`SELECT id FROM keywords WHERE keyword = ?`)
+  const newIds: number[] = []
+
+  const tx = db.transaction(() => {
+    for (const child of children) {
+      const kw = child.keyword.toLowerCase().trim()
+      if (!kw) continue
+      // Exclusion filter: skip if keyword contains any exclusion phrase
+      if (exclusions.some((ex) => kw.includes(ex.toLowerCase()))) continue
+
+      const info = insertKw.run(kw, parentId, parentDepth + 1)
+      const childId =
+        info.changes > 0
+          ? Number(info.lastInsertRowid)
+          : (getByKw.get(kw) as { id: number }).id
+
+      insertEdge.run(parentId, childId, child.source)
+      if (info.changes > 0) newIds.push(childId)
+    }
+  })
+  tx()
+  return newIds
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+export function getProjectStats(): ProjectStats {
+  const db = getDB()
+  const total = (db.prepare(`SELECT COUNT(*) as n FROM keywords`).get() as any).n
+  const withAIO = (
+    db
+      .prepare(`SELECT COUNT(DISTINCT keyword_id) as n FROM aio_sources`)
+      .get() as any
+  ).n
+  const domains = (
+    db
+      .prepare(`SELECT COUNT(DISTINCT domain_root) as n FROM aio_sources`)
+      .get() as any
+  ).n
+  const counts = getJobCounts()
+
+  return {
+    totalKeywords: total,
+    keywordsWithAIO: withAIO,
+    uniqueDomains: domains,
+    pendingKeywords: counts.pending,
+    doneKeywords: counts.done,
+    errorKeywords: counts.error
+  }
+}
+
+export function getAIOPositionReport(useSubdomain: boolean): AIOPositionRow[] {
+  const db = getDB()
+  const domainCol = useSubdomain ? 'domain_full' : 'domain_root'
+  const { total } = db
+    .prepare(`SELECT COUNT(DISTINCT keyword_id) as total FROM aio_sources`)
+    .get() as { total: number }
+
+  if (total === 0) return []
+
+  return db
+    .prepare(
+      `SELECT
+        position,
+        ${domainCol}                                          AS domain,
+        COUNT(*)                                              AS appearances,
+        COUNT(DISTINCT keyword_id)                            AS uniqueKeywords,
+        ROUND(COUNT(DISTINCT keyword_id) * 100.0 / ?, 2)     AS sharePct
+      FROM aio_sources
+      WHERE position BETWEEN 1 AND 10
+      GROUP BY position, ${domainCol}
+      ORDER BY position ASC, appearances DESC`
+    )
+    .all(total) as AIOPositionRow[]
+}
+
+export function getAIODomainPivot(useSubdomain: boolean): AIODomainPivotRow[] {
+  const domainCol = useSubdomain ? 'domain_full' : 'domain_root'
+  return getDB()
+    .prepare(
+      `SELECT
+        ${domainCol}                                          AS domain,
+        SUM(CASE WHEN position=1  THEN 1 ELSE 0 END)         AS pos1,
+        SUM(CASE WHEN position=2  THEN 1 ELSE 0 END)         AS pos2,
+        SUM(CASE WHEN position=3  THEN 1 ELSE 0 END)         AS pos3,
+        SUM(CASE WHEN position=4  THEN 1 ELSE 0 END)         AS pos4,
+        SUM(CASE WHEN position=5  THEN 1 ELSE 0 END)         AS pos5,
+        SUM(CASE WHEN position=6  THEN 1 ELSE 0 END)         AS pos6,
+        SUM(CASE WHEN position=7  THEN 1 ELSE 0 END)         AS pos7,
+        SUM(CASE WHEN position=8  THEN 1 ELSE 0 END)         AS pos8,
+        SUM(CASE WHEN position=9  THEN 1 ELSE 0 END)         AS pos9,
+        SUM(CASE WHEN position=10 THEN 1 ELSE 0 END)         AS pos10,
+        COUNT(*)                                              AS totalAppearances,
+        SUM(11 - position)                                    AS visibilityScore
+      FROM aio_sources
+      WHERE position BETWEEN 1 AND 10
+      GROUP BY ${domainCol}
+      ORDER BY visibilityScore DESC
+      LIMIT 300`
+    )
+    .all() as AIODomainPivotRow[]
+}
+
+export function getContentSourceReport(useSubdomain: boolean): ContentSourceRow[] {
+  const domainCol = useSubdomain ? 'domain_full' : 'domain_root'
+  return getDB()
+    .prepare(
+      `SELECT
+        a.${domainCol}                                                            AS domain,
+        SUM(CASE WHEN ps.section_type = 'h1'         THEN 1 ELSE 0 END)         AS h1,
+        SUM(CASE WHEN ps.section_type = 'h2'         THEN 1 ELSE 0 END)         AS h2,
+        SUM(CASE WHEN ps.section_type = 'h3'         THEN 1 ELSE 0 END)         AS h3,
+        SUM(CASE WHEN ps.section_type = 'h4'         THEN 1 ELSE 0 END)         AS h4,
+        SUM(CASE WHEN ps.section_type = 'h5'         THEN 1 ELSE 0 END)         AS h5,
+        SUM(CASE WHEN ps.section_type = 'h6'         THEN 1 ELSE 0 END)         AS h6,
+        SUM(CASE WHEN ps.section_type = 'p'          THEN 1 ELSE 0 END)         AS p,
+        SUM(CASE WHEN ps.section_type = 'li'         THEN 1 ELSE 0 END)         AS li,
+        SUM(CASE WHEN ps.section_type = 'blockquote' THEN 1 ELSE 0 END)         AS blockquote,
+        SUM(CASE WHEN ps.section_type = 'title'      THEN 1 ELSE 0 END)         AS title,
+        SUM(CASE WHEN ps.section_type = 'metaDesc'   THEN 1 ELSE 0 END)         AS metaDesc,
+        COUNT(*)                                                                  AS totalMatches
+      FROM snippet_matches sm
+      JOIN page_sections ps ON ps.id = sm.page_section_id
+      JOIN aio_sources a    ON a.id  = sm.aio_source_id
+      GROUP BY a.${domainCol}
+      ORDER BY totalMatches DESC
+      LIMIT 300`
+    )
+    .all() as ContentSourceRow[]
+}
+
+// ─── Keyword detail ───────────────────────────────────────────────────────────
+
+export interface AIOSourceRow {
+  id: number
+  position: number
+  url: string
+  domainRoot: string
+  domainFull: string
+  aioSnippet: string | null
+  resultType: string
+}
+
+export interface PAAQuestionRow {
+  id: number
+  question: string
+  position: number
+  aiAnswer: string | null
+}
+
+export interface ChildKeywordRow {
+  id: number
+  keyword: string
+  depth: number
+  status: string
+  source: string
+  aioSourceCount: number
+}
+
+export function getAIOSourcesForKeyword(keywordId: number): AIOSourceRow[] {
+  return getDB()
+    .prepare(
+      `SELECT id, position, url, domain_root as domainRoot, domain_full as domainFull,
+              aio_snippet as aioSnippet, result_type as resultType
+       FROM aio_sources
+       WHERE keyword_id = ?
+       ORDER BY result_type, position`
+    )
+    .all(keywordId) as AIOSourceRow[]
+}
+
+export function getPAAQuestionsForKeyword(keywordId: number): PAAQuestionRow[] {
+  return getDB()
+    .prepare(
+      `SELECT id, question, position, ai_answer as aiAnswer
+       FROM paa_questions
+       WHERE keyword_id = ?
+       ORDER BY position`
+    )
+    .all(keywordId) as PAAQuestionRow[]
+}
+
+export function getChildKeywordsFor(parentId: number): ChildKeywordRow[] {
+  return getDB()
+    .prepare(
+      `SELECT k.id, k.keyword, k.depth, k.status, e.source,
+              COUNT(a.id) as aioSourceCount
+       FROM keywords k
+       JOIN fanout_edges e ON e.child_keyword_id = k.id
+       LEFT JOIN aio_sources a ON a.keyword_id = k.id
+       WHERE e.parent_keyword_id = ?
+       GROUP BY k.id
+       ORDER BY k.keyword`
+    )
+    .all(parentId) as ChildKeywordRow[]
+}
+
+export function getSerpResultRaw(keywordId: number, resultType: string): string | null {
+  const row = getDB()
+    .prepare(`SELECT raw_json FROM serp_results WHERE keyword_id = ? AND result_type = ? LIMIT 1`)
+    .get(keywordId, resultType) as { raw_json: string } | undefined
+  return row?.raw_json ?? null
+}
+
+// ─── Crawler ──────────────────────────────────────────────────────────────────
+
+export interface CrawledPageRow {
+  id: number
+  url: string
+  domain: string
+  statusCode: number | null
+  title: string | null
+  sectionCount: number
+  matchCount: number
+  crawledAt: number
+  errorMsg: string | null
+}
+
+export interface CrawlStats {
+  total: number       // unique URLs in aio_sources
+  crawled: number     // in crawled_pages with no error
+  errors: number      // in crawled_pages with error
+  pending: number     // in aio_sources but not in crawled_pages
+  matched: number     // pages with at least one snippet match
+}
+
+export function getUncrawledAIOUrls(): string[] {
+  return (
+    getDB()
+      .prepare(
+        `SELECT DISTINCT url FROM aio_sources
+         WHERE url NOT IN (SELECT url FROM crawled_pages)`
+      )
+      .all() as { url: string }[]
+  ).map(r => r.url)
+}
+
+export function insertCrawledPage(page: {
+  url: string
+  statusCode: number
+  title: string
+  metaDesc: string
+  errorMsg: string | null
+  rawHtml: string | null
+}): number {
+  const db = getDB()
+
+  // Upsert: if already exists (re-crawl), update; otherwise insert
+  const existing = db.prepare(`SELECT id FROM crawled_pages WHERE url = ?`).get(page.url) as { id: number } | undefined
+  if (existing) return existing.id
+
+  const info = db.prepare(`
+    INSERT INTO crawled_pages (url, status_code, title, meta_desc, raw_html, crawled_at, error_msg)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(page.url, page.statusCode, page.title, page.metaDesc, page.rawHtml, Date.now(), page.errorMsg)
+
+  return Number(info.lastInsertRowid)
+}
+
+export function insertPageSections(
+  pageId: number,
+  sections: { sectionType: string; content: string; positionIdx: number }[]
+): void {
+  const db = getDB()
+  const insert = db.prepare(`
+    INSERT INTO page_sections (page_id, section_type, content, position_idx)
+    VALUES (?, ?, ?, ?)
+  `)
+  const tx = db.transaction(() => {
+    for (const s of sections) {
+      insert.run(pageId, s.sectionType, s.content, s.positionIdx)
+    }
+  })
+  tx()
+}
+
+export function insertSnippetMatches(
+  pageId: number,
+  matches: { aioSourceId: number; positionIdx: number; score: number; method: string }[]
+): void {
+  const db = getDB()
+  const getSectionId = db.prepare(
+    `SELECT id FROM page_sections WHERE page_id = ? AND position_idx = ?`
+  )
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO snippet_matches (aio_source_id, page_section_id, match_score, match_method)
+    VALUES (?, ?, ?, ?)
+  `)
+  const tx = db.transaction(() => {
+    for (const m of matches) {
+      const sec = getSectionId.get(pageId, m.positionIdx) as { id: number } | undefined
+      if (sec) insert.run(m.aioSourceId, sec.id, m.score, m.method)
+    }
+  })
+  tx()
+}
+
+// Returns all AIO sources for a given URL (may span many keywords)
+export function getAIOSourcesForUrl(
+  url: string
+): { id: number; aioSnippet: string | null }[] {
+  return getDB()
+    .prepare(`SELECT id, aio_snippet as aioSnippet FROM aio_sources WHERE url = ?`)
+    .all(url) as { id: number; aioSnippet: string | null }[]
+}
+
+export function getCrawlStats(): CrawlStats {
+  const db = getDB()
+  const total   = (db.prepare(`SELECT COUNT(DISTINCT url) as n FROM aio_sources`).get() as any).n
+  const crawled = (db.prepare(`SELECT COUNT(*) as n FROM crawled_pages WHERE error_msg IS NULL`).get() as any).n
+  const errors  = (db.prepare(`SELECT COUNT(*) as n FROM crawled_pages WHERE error_msg IS NOT NULL`).get() as any).n
+  const matched = (db.prepare(`SELECT COUNT(DISTINCT p.id) as n FROM crawled_pages p JOIN page_sections s ON s.page_id=p.id JOIN snippet_matches m ON m.page_section_id=s.id`).get() as any).n
+  return { total, crawled, errors, pending: total - crawled - errors, matched }
+}
+
+export function getCrawledPageRows(limit = 500, offset = 0): CrawledPageRow[] {
+  return getDB()
+    .prepare(
+      `SELECT
+        p.id,
+        p.url,
+        SUBSTR(p.url, INSTR(p.url, '://') + 3,
+          CASE WHEN INSTR(SUBSTR(p.url, INSTR(p.url,'://')+3), '/') = 0
+               THEN LENGTH(p.url)
+               ELSE INSTR(SUBSTR(p.url, INSTR(p.url,'://')+3), '/') - 1
+          END) AS domain,
+        p.status_code as statusCode,
+        p.title,
+        COUNT(DISTINCT s.id)  AS sectionCount,
+        COUNT(DISTINCT sm.id) AS matchCount,
+        p.crawled_at as crawledAt,
+        p.error_msg as errorMsg
+      FROM crawled_pages p
+      LEFT JOIN page_sections s  ON s.page_id = p.id
+      LEFT JOIN snippet_matches sm ON sm.page_section_id = s.id
+      GROUP BY p.id
+      ORDER BY p.crawled_at DESC
+      LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset) as CrawledPageRow[]
+}
+
+// ─── Topics ───────────────────────────────────────────────────────────────────
+
+export function getClusterableKeywords(): ClusterInput[] {
+  const db = getDB()
+  const keywords = db.prepare(
+    `SELECT id, keyword FROM keywords WHERE status IN ('done', 'error')`
+  ).all() as { id: number; keyword: string }[]
+
+  const getDomains = db.prepare(
+    `SELECT DISTINCT domain_root FROM aio_sources WHERE keyword_id = ?`
+  )
+  return keywords.map(kw => ({
+    id: kw.id,
+    keyword: kw.keyword,
+    domains: (getDomains.all(kw.id) as { domain_root: string }[]).map(r => r.domain_root)
+  }))
+}
+
+export function clearTopics(): void {
+  const db = getDB()
+  db.exec('DELETE FROM topic_keywords; DELETE FROM topics;')
+}
+
+// Wipes all research data for a fresh session.
+// Preserves the `project` and `_meta` tables (settings + schema version).
+export function clearProjectData(): void {
+  getDB().exec(`
+    DELETE FROM snippet_matches;
+    DELETE FROM page_sections;
+    DELETE FROM crawled_pages;
+    DELETE FROM topic_keywords;
+    DELETE FROM topics;
+    DELETE FROM fanout_edges;
+    DELETE FROM paa_questions;
+    DELETE FROM aio_sources;
+    DELETE FROM serp_results;
+    DELETE FROM keywords;
+  `)
+}
+
+export function insertTopics(clusters: Cluster[]): void {
+  const db = getDB()
+  const insertTopic = db.prepare(
+    `INSERT INTO topics (label, keywords) VALUES (?, ?)`
+  )
+  const insertLink = db.prepare(
+    `INSERT OR IGNORE INTO topic_keywords (topic_id, keyword_id, similarity) VALUES (?, ?, ?)`
+  )
+  const tx = db.transaction(() => {
+    for (const cluster of clusters) {
+      const info = insertTopic.run(cluster.label, JSON.stringify(cluster.keywords))
+      const topicId = Number(info.lastInsertRowid)
+      for (const m of cluster.members) {
+        insertLink.run(topicId, m.id, m.similarity)
+      }
+    }
+  })
+  tx()
+}
+
+export function getTopics(): TopicRow[] {
+  return getDB().prepare(
+    `SELECT
+       t.id,
+       t.label,
+       COUNT(tk.keyword_id)             AS memberCount,
+       ROUND(AVG(tk.similarity), 2)     AS avgSimilarity,
+
+       -- Top 5 keywords by similarity, pipe-separated
+       (SELECT GROUP_CONCAT(sub.keyword, '|')
+        FROM (SELECT k2.keyword
+              FROM topic_keywords tk2
+              JOIN keywords k2 ON k2.id = tk2.keyword_id
+              WHERE tk2.topic_id = t.id
+              ORDER BY tk2.similarity DESC
+              LIMIT 5) sub
+       ) AS topKeywords,
+
+       -- Domain that appears most often across all keywords in this topic
+       (SELECT sub.domain_root
+        FROM (SELECT a.domain_root, COUNT(*) AS cnt
+              FROM aio_sources a
+              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
+              WHERE tk2.topic_id = t.id AND a.domain_root != ''
+                AND a.position BETWEEN 1 AND 10
+              GROUP BY a.domain_root
+              ORDER BY cnt DESC LIMIT 1) sub
+       ) AS topDomain,
+
+       (SELECT sub.cnt
+        FROM (SELECT a.domain_root, COUNT(*) AS cnt
+              FROM aio_sources a
+              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
+              WHERE tk2.topic_id = t.id AND a.domain_root != ''
+                AND a.position BETWEEN 1 AND 10
+              GROUP BY a.domain_root
+              ORDER BY cnt DESC LIMIT 1) sub
+       ) AS topDomainCount,
+
+       -- Domain with the best (lowest) AIO position across all keywords in this topic
+       (SELECT sub.domain_root
+        FROM (SELECT a.domain_root, MIN(a.position) AS best_pos
+              FROM aio_sources a
+              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
+              WHERE tk2.topic_id = t.id AND a.position BETWEEN 1 AND 10
+              GROUP BY a.domain_root
+              ORDER BY best_pos ASC LIMIT 1) sub
+       ) AS bestDomain,
+
+       (SELECT sub.best_pos
+        FROM (SELECT a.domain_root, MIN(a.position) AS best_pos
+              FROM aio_sources a
+              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
+              WHERE tk2.topic_id = t.id AND a.position BETWEEN 1 AND 10
+              GROUP BY a.domain_root
+              ORDER BY best_pos ASC LIMIT 1) sub
+       ) AS bestDomainPosition
+
+     FROM topics t
+     LEFT JOIN topic_keywords tk ON tk.topic_id = t.id
+     GROUP BY t.id
+     ORDER BY memberCount DESC`
+  ).all() as TopicRow[]
+}
+
+export function getTopicKeywords(topicId: number): TopicKeywordRow[] {
+  return getDB().prepare(
+    `SELECT k.id, k.keyword, tk.similarity, k.depth,
+            COUNT(a.id) AS aioSourceCount
+     FROM topic_keywords tk
+     JOIN keywords k ON k.id = tk.keyword_id
+     LEFT JOIN aio_sources a ON a.keyword_id = k.id
+     WHERE tk.topic_id = ?
+     GROUP BY k.id
+     ORDER BY tk.similarity DESC`
+  ).all(topicId) as TopicKeywordRow[]
+}
+
+export function updateTopicLabel(topicId: number, label: string): void {
+  getDB().prepare(`UPDATE topics SET label = ? WHERE id = ?`).run(label, topicId)
+}
+
+export function getSnippetMatchesForKeyword(keywordId: number): {
+  url: string
+  position: number
+  sectionType: string
+  sectionContent: string
+  score: number
+}[] {
+  return getDB()
+    .prepare(
+      `SELECT
+        a.url, a.position,
+        ps.section_type as sectionType,
+        ps.content      as sectionContent,
+        sm.match_score  as score
+      FROM aio_sources a
+      JOIN snippet_matches sm ON sm.aio_source_id = a.id
+      JOIN page_sections ps  ON ps.id = sm.page_section_id
+      WHERE a.keyword_id = ?
+      ORDER BY a.position, sm.match_score DESC`
+    )
+    .all(keywordId) as any[]
+}

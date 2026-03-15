@@ -1,0 +1,140 @@
+// All CREATE TABLE statements for a project DB.
+// Run once on project creation; migrations handle schema changes.
+
+export const SCHEMA_VERSION = 2
+
+export const CREATE_TABLES = `
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=-65536;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS _meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project (
+  id                  INTEGER PRIMARY KEY,
+  name                TEXT NOT NULL,
+  created_at          INTEGER NOT NULL,
+  dfs_login           TEXT NOT NULL DEFAULT '',
+  dfs_password        TEXT NOT NULL DEFAULT '',
+  dfs_api_key         TEXT NOT NULL DEFAULT '',
+  location_code       INTEGER NOT NULL DEFAULT 2840,
+  language_code       TEXT NOT NULL DEFAULT 'en',
+  device              TEXT NOT NULL DEFAULT 'desktop',
+  fan_out_depth       INTEGER NOT NULL DEFAULT 2,
+  fan_out_cap         INTEGER NOT NULL DEFAULT 5,
+  exclusion_keywords  TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS keywords (
+  id          INTEGER PRIMARY KEY,
+  keyword     TEXT NOT NULL,
+  parent_id   INTEGER REFERENCES keywords(id),
+  depth       INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  queued_at   INTEGER,
+  started_at  INTEGER,
+  done_at     INTEGER,
+  error_msg   TEXT,
+  UNIQUE(keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kw_status ON keywords(status);
+CREATE INDEX IF NOT EXISTS idx_kw_parent ON keywords(parent_id);
+CREATE INDEX IF NOT EXISTS idx_kw_depth  ON keywords(depth);
+
+CREATE TABLE IF NOT EXISTS serp_results (
+  id           INTEGER PRIMARY KEY,
+  keyword_id   INTEGER NOT NULL REFERENCES keywords(id),
+  result_type  TEXT NOT NULL,
+  raw_json     TEXT NOT NULL,
+  fetched_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sr_keyword ON serp_results(keyword_id, result_type);
+
+CREATE TABLE IF NOT EXISTS aio_sources (
+  id            INTEGER PRIMARY KEY,
+  keyword_id    INTEGER NOT NULL REFERENCES keywords(id),
+  position      INTEGER NOT NULL,
+  url           TEXT NOT NULL,
+  domain_root   TEXT NOT NULL,
+  domain_full   TEXT NOT NULL,
+  aio_snippet   TEXT,
+  result_type   TEXT NOT NULL DEFAULT 'aio'
+);
+
+CREATE INDEX IF NOT EXISTS idx_as_keyword  ON aio_sources(keyword_id);
+CREATE INDEX IF NOT EXISTS idx_as_domain_r ON aio_sources(domain_root, position);
+CREATE INDEX IF NOT EXISTS idx_as_domain_f ON aio_sources(domain_full, position);
+
+CREATE TABLE IF NOT EXISTS paa_questions (
+  id         INTEGER PRIMARY KEY,
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+  question   TEXT NOT NULL,
+  position   INTEGER,
+  ai_answer  TEXT,
+  depth      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paa_keyword ON paa_questions(keyword_id);
+
+CREATE TABLE IF NOT EXISTS fanout_edges (
+  parent_keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+  child_keyword_id  INTEGER NOT NULL REFERENCES keywords(id),
+  source            TEXT NOT NULL,
+  PRIMARY KEY(parent_keyword_id, child_keyword_id)
+);
+
+CREATE TABLE IF NOT EXISTS crawled_pages (
+  id           INTEGER PRIMARY KEY,
+  url          TEXT NOT NULL UNIQUE,
+  status_code  INTEGER,
+  title        TEXT,
+  meta_desc    TEXT,
+  raw_html     TEXT,
+  crawled_at   INTEGER NOT NULL,
+  error_msg    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS page_sections (
+  id            INTEGER PRIMARY KEY,
+  page_id       INTEGER NOT NULL REFERENCES crawled_pages(id),
+  section_type  TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  position_idx  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ps_page ON page_sections(page_id);
+
+CREATE TABLE IF NOT EXISTS snippet_matches (
+  id              INTEGER PRIMARY KEY,
+  aio_source_id   INTEGER NOT NULL REFERENCES aio_sources(id),
+  page_section_id INTEGER NOT NULL REFERENCES page_sections(id),
+  match_score     REAL NOT NULL,
+  match_method    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sm_source ON snippet_matches(aio_source_id);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id       INTEGER PRIMARY KEY,
+  label    TEXT NOT NULL,
+  keywords TEXT NOT NULL,
+  centroid TEXT
+);
+
+CREATE TABLE IF NOT EXISTS topic_keywords (
+  topic_id   INTEGER NOT NULL REFERENCES topics(id),
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+  similarity REAL,
+  PRIMARY KEY(topic_id, keyword_id)
+);
+`
+
+export const MIGRATIONS: Record<number, string> = {
+  2: `ALTER TABLE project ADD COLUMN dfs_api_key TEXT NOT NULL DEFAULT '';`
+}

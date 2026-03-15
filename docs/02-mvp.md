@@ -1,0 +1,139 @@
+# MVP Definition — Fanout SEO
+
+> **MVP Goal:** A working desktop app that can ingest keywords, fetch AIO data, and display the position 1–10 domain analysis.
+
+---
+
+## Feature Checklist
+
+### ✅ Phase 1 — Foundation (Complete)
+
+- [x] **Electron + Vite + React + TS scaffold** — `electron-vite`, `@vitejs/plugin-react`
+- [x] **`better-sqlite3` integration** — v12.8.0, rebuilt for Electron 33 via `npm run rebuild`
+- [x] **DB schema** (10 tables: keywords, serp_results, aio_sources, paa_questions, fanout_edges, crawled_pages, page_sections, snippet_matches, topics, topic_keywords)
+- [x] **DB migration runner** — versioned via `_meta.schema_version`
+- [x] **Project create/open** — file dialog → `.aio-project.db`
+- [x] **Project settings UI** — credentials, location, language, device, fan-out depth/cap, exclusion keywords
+- [x] **MCP client** — DataForSEO MCP via stdio `child_process`, CJS-compatible import path
+- [x] **Connection test + "List Available Tools"** — in Setup view, logs tool table to DevTools
+- [x] **Typed IPC bridge** — `contextBridge` → `window.api`, full TypeScript types in `src/types/index.ts`
+- [x] **Launcher** — `Fanout.command` double-click launcher with first-run dependency check
+- [x] **`.gitignore`** — excludes `node_modules`, `out`, `*.aio-project.db`
+
+### ✅ Phase 2 — Core MVP (Scaffold Complete, Needs Live API Test)
+
+#### Keyword Input
+- [x] **Text paste input** — textarea → line/comma split → INSERT OR IGNORE
+- [x] **Input deduplication** — UNIQUE constraint on `keywords.keyword`
+- [x] **Insert result feedback** — shows "+N new (M dupes skipped)"
+- [x] **Keyword queue table** — status badges, depth, AIO source count, live polling every 3s
+
+#### DataForSEO Integration
+- [x] **MCP client connection** — spawn `npx @dataforseo/mcp-server` with env creds
+- [x] **`listTools()` method** — call from DevTools to discover actual tool names
+- [x] **`fetchSERP()`** — wraps SERP Advanced tool (tool name needs live verification)
+- [x] **`fetchAIMode()`** — wraps AI Mode tool (tool name needs live verification)
+- [x] **Retry logic** — inline exponential backoff, 3 attempts SERP / 2 attempts AI Mode
+- [x] **Raw JSON stored first** — `serp_results` table captures full response before extraction
+
+#### Fan-Out Engine
+- [x] **Custom queue** — `SimpleQueue` class (no external deps, rate-limited, pause/resume)
+- [x] **Fan-out worker** — `processKeyword()`: fetch → extract → store → create children
+- [x] **Child keyword extraction** — from PAA questions + AI Mode follow-ups
+- [x] **Exclusion keyword filtering** — checked in `insertChildKeywords()` before DB insert
+- [x] **Deduplication** — INSERT OR IGNORE; only newly inserted IDs get enqueued
+- [x] **Depth + cap enforcement** — `depth < fanOutDepth`, `slice(0, fanOutCap)`
+- [x] **`fanout_edges` population** — parent→child with source type ('paa' | 'ai_mode_followup')
+
+#### AIO Source Extraction
+- [x] **`extractAIOSources()`** — parses `ai_overview` item from SERP response
+- [x] **`extractAIModeSources()`** — parses AI Mode overview sources
+- [x] **`extractPAAQuestions()`** — parses `people_also_ask` items
+- [x] **`extractAIModeFollowups()`** — parses follow_up_queries array
+- [x] **`domain_root` parsing** — `split('.').slice(-2).join('.')` (co.uk acceptable per decision)
+- [x] **`domain_full` parsing** — strips `www.` only
+- [x] **Defensive extraction** — all functions use optional chaining; handles MCP content wrapper
+
+#### AIO Position Report
+- [x] **Domain heatmap table** — domain rows × pos1–pos10 columns, heat CSS classes
+- [x] **By-position tab** — filterable by position 1–10, share % column
+- [x] **Domain mode toggle** — Root ↔ Subdomain, session-only Zustand state
+- [x] **AI Visibility Score** — `SUM(11 - position)`, shown per domain
+- [x] **Sort on all columns** — click header to sort asc/desc
+- [x] **Filter by domain** — text input filters domain rows live
+- [x] **CSV export** — position report + pivot export via file dialog
+
+#### Run Management
+- [x] **Start / Pause / Resume / Stop** — `FanoutScheduler` controls
+- [x] **Live job count badges** — pending / running / done / error
+- [x] **Progress bar** — done / total percentage
+- [x] **IPC progress events** — main → renderer every 2 seconds via `run:progress`
+
+---
+
+### ✅ Phase 2 — Complete
+
+- [x] **Keyword detail panel** — click keyword → see its AIO sources + PAA questions + children
+- [x] **Project stats in sidebar** — live counts (keywords with AIO, unique domains)
+- [x] **Raw JSON inspector** — view stored API response for any keyword (debug tool names)
+- [x] **CSV upload** — CSV file → detect keyword column, strip BOM
+- [x] **Direct HTTP client** — `undici` fetch to DataForSEO REST API; `Authorization: Basic <base64>`
+- [x] **Global credentials store** — `userData/api-credentials.json`; Save + Test buttons always visible in Setup
+
+---
+
+### ✅ Phase 3 — Crawler + Snippet Matching (Complete)
+
+- [x] **URL crawler** — `undici` fetch, per-domain rate limiting (2.5s), 15s timeout, JS-SPA detection
+- [x] **Firecrawl fallback** — cloud JS-render API retried when direct fetch returns empty/JS-blocked pages; `JS_ONLY_DOMAINS` set (YouTube, Twitter/X, Instagram, etc.) always routes to Firecrawl; permanent failures (404/410/5xx) skip Firecrawl
+- [x] **403 handling** — attempts HTML extraction regardless of status code; clears error if real content found
+- [x] **Section extraction** — `cheerio` parses h1–h6, p, li, blockquote; noise removal (nav/footer/ads); `extractPageContentFromMarkdown` for Firecrawl markdown output
+- [x] **Snippet matching** — TF-IDF weighted Jaccard + token overlap + bigram overlap + heading bonus
+- [x] **Crawl queue UI** — Start/Pause/Resume/Stop, stats bar (Total/Crawled/Matched/Errors/Remaining), progress bar
+- [x] **Progress bar accuracy** — counts `crawled + errors` toward completion; shows "Complete · N errors" in amber when done with errors
+- [x] **Crawled pages table** — status code, sections count, match count, title, error; filter by ok/error/empty
+- [x] **Snippet match storage** — `snippet_matches` table links `aio_source_id` → `page_section_id` with score
+
+---
+
+### ✅ Phase 4 — Topic Clustering (Complete)
+
+- [x] **Clustering algorithm** — overlap coefficient (text) + domain Jaccard; connected components via BFS
+- [x] **Singleton topics** — keywords that don't cluster with others appear as solo topics (no minimum cluster size)
+- [x] **Error-status keywords included** — `getClusterableKeywords()` includes `status IN ('done', 'error')`
+- [x] **Suffix normalization** — strips -ing, -tion, -es, -s for better cross-form token matching
+- [x] **Inverted index** — O(K+E) candidate pair generation; avoids O(K²) brute-force
+- [x] **Auto-labeling** — top-3 most frequent normalized tokens across cluster members
+- [x] **User-editable labels** — inline edit on click, saved immediately to DB
+- [x] **Topic table** — 4 columns: Topic Label, Keywords (inline chip list), Most Shown domain (×count), Highest Ranking domain (position badge)
+- [x] **Keyword drill-down panel** — click topic → see member keywords with similarity badges
+- [x] **Re-cluster on demand** — "Run Clustering" button clears and rebuilds all topics
+- [x] **DB persistence** — `topics` + `topic_keywords` tables; survives app restart
+
+### ✅ Post-Phase 4 — UX & Analysis Enhancements (Complete)
+
+- [x] **Keywords view text filter** — filter keyword rows by text substring in real time
+- [x] **Multi-domain comparison columns** — add N domains as comparison columns; each shows AIO position badge or `—` per keyword; uses `useQueries` for parallel fetches
+- [x] **Domain autocomplete** — live suggestions dropdown (Google-style) from `getDomainSuggestions()` as user types; click to add; excludes already-added domains
+- [x] **AIO Result Count column** — always visible; separate from domain comparison columns
+- [x] **AIO Positions heatmap legend** — color swatch strip (levels 1–9) with "Low → High" label and score formula note in filter bar
+- [x] **AIO Visibility Score bar** — mini progress bar relative to max score shown in Score column
+- [x] **Clear Project Data** — "Danger Zone" in Setup with two-step inline confirm; FK-safe DELETE preserves `project` settings
+- [x] **Clear DataForSEO credentials** — red Clear button next to Save/Test in API Credentials section
+
+### 🔲 Phase 5 — Polish + iOS
+
+---
+
+## Known Issues / Watch Items
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| DataForSEO MCP subprocess | ✅ Replaced | Direct REST API via `undici`; no child process needed |
+| `p-queue` / `p-retry` are ESM-only | ✅ Resolved | Replaced with inline `SimpleQueue` + `withRetry()` |
+| `@modelcontextprotocol/sdk` ESM | ✅ Moot | MCP approach dropped; using direct HTTP |
+| `better-sqlite3` C++20 rebuild | ✅ Resolved | Use v12.8.0; run `npm run rebuild` after install |
+
+---
+
+*← [Project Overview](./01-project-overview.md) | Next: [Roadmap](./03-roadmap.md) →*
