@@ -134,9 +134,10 @@ export function clusterKeywords(inputs: ClusterInput[]): Cluster[] {
     if (visited.has(kw.id)) continue
     const component: number[] = []
     const queue = [kw.id]
+    let head = 0
     visited.add(kw.id)
-    while (queue.length > 0) {
-      const curr = queue.shift()!
+    while (head < queue.length) {
+      const curr = queue[head++]
       component.push(curr)
       for (const neighbor of (edges.get(curr)?.keys() ?? [])) {
         if (!visited.has(neighbor)) {
@@ -162,15 +163,19 @@ export function clusterKeywords(inputs: ClusterInput[]): Cluster[] {
           .map(x => x.id)
       : component
 
-    // Compute similarity for each member vs the rest of the cluster
+    // Compute similarity for each member: average of existing edge weights to cluster members.
+    // Uses the pre-built edges map directly — O(degree) per node instead of O(n) scan.
+    const memberSet = new Set(members)
     const membersWithSim = members.map(id => {
-      const neighborScores = members
-        .filter(other => other !== id)
-        .map(other => edges.get(id)?.get(other) ?? 0)
-      const avgSim = neighborScores.length > 0
-        ? neighborScores.reduce((s, v) => s + v, 0) / neighborScores.length
-        : 0
-      return { id, similarity: Math.round(avgSim * 100) / 100 }
+      const neighborMap = edges.get(id)
+      let sum = 0
+      let count = 0
+      if (neighborMap) {
+        for (const [other, score] of neighborMap) {
+          if (memberSet.has(other)) { sum += score; count++ }
+        }
+      }
+      return { id, similarity: Math.round((count > 0 ? sum / count : 0) * 100) / 100 }
     })
 
     // Label: top 3 most frequent normalized tokens across member keywords

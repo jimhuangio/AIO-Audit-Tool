@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -136,5 +136,9 @@ CREATE TABLE IF NOT EXISTS topic_keywords (
 `
 
 export const MIGRATIONS: Record<number, string> = {
-  2: `ALTER TABLE project ADD COLUMN dfs_api_key TEXT NOT NULL DEFAULT '';`
+  2: `ALTER TABLE project ADD COLUMN dfs_api_key TEXT NOT NULL DEFAULT '';`,
+  3: [
+    `CREATE INDEX IF NOT EXISTS idx_as_url ON aio_sources(url);`,
+    `CREATE INDEX IF NOT EXISTS idx_ps_page_pos ON page_sections(page_id, position_idx);`
+  ].join('\n')
 }

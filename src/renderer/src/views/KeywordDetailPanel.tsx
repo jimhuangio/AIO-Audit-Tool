@@ -1,6 +1,6 @@
 // Slide-in panel: shown when a keyword row is clicked in KeywordsView.
 // Shows AIO sources (pos 1-10), PAA questions, child keywords, and raw JSON inspector.
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 interface Props {
@@ -273,15 +273,11 @@ function RawTab({
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Pretty-print JSON
-  let pretty = ''
-  if (raw) {
-    try {
-      pretty = JSON.stringify(JSON.parse(raw), null, 2)
-    } catch {
-      pretty = raw
-    }
-  }
+  // Pretty-print JSON — memoized so large blobs don't re-parse on every render
+  const pretty = useMemo(() => {
+    if (!raw) return ''
+    try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
+  }, [raw])
 
   return (
     <div className="flex flex-col h-full">

@@ -1,5 +1,11 @@
 // Processes a single keyword: fetch SERP data → extract → store → schedule children
 import { mcpClient } from '../mcp/client'
+import type { ProjectMeta } from '../../types'
+
+// Cached project meta — set once per run by the scheduler to avoid a DB read per keyword
+let _runMeta: ProjectMeta | null = null
+export function setRunMeta(meta: ProjectMeta): void { _runMeta = meta }
+export function clearRunMeta(): void { _runMeta = null }
 
 // Simple retry with exponential backoff (replaces p-retry ESM dep)
 async function withRetry<T>(
@@ -48,7 +54,7 @@ export async function processKeyword(
   callbacks: WorkerCallbacks
 ): Promise<void> {
   const kw = getKeyword(keywordId)
-  const meta = getProjectMeta()
+  const meta = _runMeta ?? getProjectMeta()
   markKeywordRunning(keywordId)
 
   try {

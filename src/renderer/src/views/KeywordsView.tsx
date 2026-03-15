@@ -26,7 +26,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export function KeywordsView(): JSX.Element {
-  const { project } = useAppStore()
+  const { project, runStatus } = useAppStore()
   const queryClient = useQueryClient()
   const [pasteText, setPasteText] = useState('')
   const [inserting, setInserting] = useState(false)
@@ -45,7 +45,8 @@ export function KeywordsView(): JSX.Element {
     queryKey: ['keywords', 'rows'],
     queryFn: () => window.api.getKeywordRows(2000, 0),
     enabled: !!project,
-    refetchInterval: 3000
+    staleTime: 2000,
+    refetchInterval: runStatus === 'running' ? 3000 : false
   })
 
   // Live suggestions as user types
@@ -64,6 +65,10 @@ export function KeywordsView(): JSX.Element {
     }))
   })
 
+  // Stable key derived from data update timestamps — prevents re-running when the
+  // useQueries array reference changes but no data has actually updated.
+  const domainDataKey = domainPositionResults.map(r => r.dataUpdatedAt ?? 0).join(',')
+
   // Build map: domain -> keywordId -> best position
   const domainPositionMaps = useMemo(() => {
     const maps: Record<string, Record<number, number>> = {}
@@ -74,7 +79,8 @@ export function KeywordsView(): JSX.Element {
       maps[domain] = map
     })
     return maps
-  }, [selectedDomains, domainPositionResults])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDomains, domainDataKey])
 
   const filtered = useMemo(() => {
     const rows = keywords.filter((k) => {

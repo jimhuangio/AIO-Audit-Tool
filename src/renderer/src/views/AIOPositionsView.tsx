@@ -422,19 +422,20 @@ function ContentSourcesTable({
     )
   }
 
-  // Compute overall totals across all domains for the summary bar
-  const totals: Record<string, number> = {}
-  let grandTotal = 0
-  for (const st of SECTION_TYPES) {
-    totals[st] = rows.reduce((s, r) => s + (r[st as keyof ContentSourceRow] as number), 0)
-    grandTotal += totals[st]
-  }
-
-  // Compute per-column max for heat scaling
-  const colMaxes: Record<string, number> = {}
-  for (const st of SECTION_TYPES) {
-    colMaxes[st] = Math.max(...rows.map((r) => r[st as keyof ContentSourceRow] as number), 1)
-  }
+  // Memoized so they don't recompute on every keystroke in the filter input
+  const { totals, grandTotal, colMaxes } = useMemo(() => {
+    const totals: Record<string, number> = {}
+    let grandTotal = 0
+    for (const st of SECTION_TYPES) {
+      totals[st] = rows.reduce((s, r) => s + (r[st as keyof ContentSourceRow] as number), 0)
+      grandTotal += totals[st]
+    }
+    const colMaxes: Record<string, number> = {}
+    for (const st of SECTION_TYPES) {
+      colMaxes[st] = Math.max(...rows.map((r) => r[st as keyof ContentSourceRow] as number), 1)
+    }
+    return { totals, grandTotal, colMaxes }
+  }, [rows])
 
   return (
     <div>

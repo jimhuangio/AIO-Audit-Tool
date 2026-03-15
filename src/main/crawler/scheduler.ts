@@ -36,7 +36,10 @@ interface CrawlTask {
 }
 
 export class CrawlScheduler {
-  private queue: CrawlTask[] = []
+  // Per-domain queues: round-robin dispatch with per-domain rate limiting
+  private domainQueues = new Map<string, string[]>()
+  private domainOrder: string[] = []   // round-robin cursor
+  private domainCursor = 0
   private running = 0
   private paused = false
   private active = false
@@ -74,7 +77,9 @@ export class CrawlScheduler {
   stop(): void {
     this.active = false
     this.paused = true
-    this.queue = []
+    this.domainQueues.clear()
+    this.domainOrder = []
+    this.domainCursor = 0
     this.stopProgressBroadcast()
   }
 
@@ -83,44 +88,81 @@ export class CrawlScheduler {
   }
 
   get queueLength(): number {
-    return this.queue.length
+    let total = 0
+    for (const q of this.domainQueues.values()) total += q.length
+    return total
   }
 
   private async loadQueue(): Promise<void> {
     const urls = getUncrawledAIOUrls()
-    this.queue = urls.map(url => {
-      try { return { url, domain: new URL(url).hostname } } catch { return null }
-    }).filter(Boolean) as CrawlTask[]
-    console.log(`[crawl] loaded ${this.queue.length} uncrawled URLs`)
+    this.domainQueues.clear()
+    this.domainOrder = []
+    this.domainCursor = 0
+
+    for (const url of urls) {
+      try {
+        const domain = new URL(url).hostname
+        if (!this.domainQueues.has(domain)) {
+          this.domainQueues.set(domain, [])
+          this.domainOrder.push(domain)
+        }
+        this.domainQueues.get(domain)!.push(url)
+      } catch { /* skip malformed URLs */ }
+    }
+    console.log(`[crawl] loaded ${urls.length} uncrawled URLs across ${this.domainOrder.length} domains`)
   }
 
   private drain(): void {
     if (this.paused || !this.active) return
 
-    while (this.running < this.concurrency && this.queue.length > 0) {
-      // Find next task that respects domain rate limit
-      const now = Date.now()
-      const idx = this.queue.findIndex(task => {
-        const last = this.domainLastRequest.get(task.domain) ?? 0
-        return now - last >= DOMAIN_DELAY_MS
-      })
+    const now = Date.now()
+    let dispatched = 0
+    let checked = 0
+    const total = this.domainOrder.length
 
-      if (idx === -1) {
-        // All remaining tasks are rate-limited; retry after delay
-        setTimeout(() => this.drain(), 500)
-        break
+    while (this.running < this.concurrency && checked < total) {
+      if (this.domainCursor >= this.domainOrder.length) this.domainCursor = 0
+      const domain = this.domainOrder[this.domainCursor]
+      const q = this.domainQueues.get(domain)
+
+      // Remove exhausted domain from rotation
+      if (!q || q.length === 0) {
+        this.domainOrder.splice(this.domainCursor, 1)
+        this.domainQueues.delete(domain)
+        checked++
+        continue
       }
 
-      const [task] = this.queue.splice(idx, 1)
-      this.domainLastRequest.set(task.domain, Date.now())
-      this.running++
+      const last = this.domainLastRequest.get(domain) ?? 0
+      if (now - last < DOMAIN_DELAY_MS) {
+        this.domainCursor++
+        checked++
+        continue
+      }
 
-      this.processURL(task.url)
-        .catch(err => console.error(`[crawl] unhandled error for ${task.url}:`, err))
+      const url = q.shift()!
+      if (q.length === 0) {
+        this.domainOrder.splice(this.domainCursor, 1)
+        this.domainQueues.delete(domain)
+      } else {
+        this.domainCursor++
+      }
+
+      this.domainLastRequest.set(domain, now)
+      this.running++
+      dispatched++
+
+      this.processURL(url)
+        .catch(err => console.error(`[crawl] unhandled error for ${url}:`, err))
         .finally(() => {
           this.running--
           setImmediate(() => this.drain())
         })
+    }
+
+    // If we couldn't dispatch anything due to rate limits, retry after delay
+    if (dispatched === 0 && this.queueLength > 0 && this.running < this.concurrency) {
+      setTimeout(() => this.drain(), 500)
     }
   }
 

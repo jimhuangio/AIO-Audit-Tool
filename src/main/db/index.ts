@@ -19,6 +19,7 @@ export function openProject(filePath: string): ProjectMeta {
   _db.exec(CREATE_TABLES)
   runMigrations(_db)
 
+
   const row = _db.prepare('SELECT * FROM project LIMIT 1').get() as any
   if (!row) throw new Error('Project file has no project row — may be corrupt')
 
@@ -57,7 +58,12 @@ function runMigrations(db: Database.Database): void {
   while (current < SCHEMA_VERSION) {
     const next = current + 1
     const sql = MIGRATIONS[next]
-    if (sql) db.exec(sql)
+    if (sql) {
+      // Execute each statement separately to avoid partial-failure issues
+      for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
+        db.exec(stmt + ';')
+      }
+    }
     db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(String(next))
     current = next
   }
@@ -352,27 +358,22 @@ export function insertChildKeywords(
 // ─── Reports ─────────────────────────────────────────────────────────────────
 
 export function getProjectStats(): ProjectStats {
-  const db = getDB()
-  const total = (db.prepare(`SELECT COUNT(*) as n FROM keywords`).get() as any).n
-  const withAIO = (
-    db
-      .prepare(`SELECT COUNT(DISTINCT keyword_id) as n FROM aio_sources`)
-      .get() as any
-  ).n
-  const domains = (
-    db
-      .prepare(`SELECT COUNT(DISTINCT domain_root) as n FROM aio_sources`)
-      .get() as any
-  ).n
-  const counts = getJobCounts()
-
+  const row = getDB().prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM keywords)                                      AS totalKeywords,
+      (SELECT COUNT(DISTINCT keyword_id) FROM aio_sources)                 AS keywordsWithAIO,
+      (SELECT COUNT(DISTINCT domain_root) FROM aio_sources)                AS uniqueDomains,
+      (SELECT SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) FROM keywords) AS pendingKeywords,
+      (SELECT SUM(CASE WHEN status='done'    THEN 1 ELSE 0 END) FROM keywords) AS doneKeywords,
+      (SELECT SUM(CASE WHEN status='error'   THEN 1 ELSE 0 END) FROM keywords) AS errorKeywords
+  `).get() as any
   return {
-    totalKeywords: total,
-    keywordsWithAIO: withAIO,
-    uniqueDomains: domains,
-    pendingKeywords: counts.pending,
-    doneKeywords: counts.done,
-    errorKeywords: counts.error
+    totalKeywords:    row.totalKeywords    ?? 0,
+    keywordsWithAIO:  row.keywordsWithAIO  ?? 0,
+    uniqueDomains:    row.uniqueDomains    ?? 0,
+    pendingKeywords:  row.pendingKeywords  ?? 0,
+    doneKeywords:     row.doneKeywords     ?? 0,
+    errorKeywords:    row.errorKeywords    ?? 0
   }
 }
 
@@ -555,8 +556,10 @@ export function getUncrawledAIOUrls(): string[] {
   return (
     getDB()
       .prepare(
-        `SELECT DISTINCT url FROM aio_sources
-         WHERE url NOT IN (SELECT url FROM crawled_pages)`
+        `SELECT DISTINCT a.url
+         FROM aio_sources a
+         LEFT JOIN crawled_pages c ON c.url = a.url
+         WHERE c.url IS NULL`
       )
       .all() as { url: string }[]
   ).map(r => r.url)
@@ -632,11 +635,16 @@ export function getAIOSourcesForUrl(
 }
 
 export function getCrawlStats(): CrawlStats {
-  const db = getDB()
-  const total   = (db.prepare(`SELECT COUNT(DISTINCT url) as n FROM aio_sources`).get() as any).n
-  const crawled = (db.prepare(`SELECT COUNT(*) as n FROM crawled_pages WHERE error_msg IS NULL`).get() as any).n
-  const errors  = (db.prepare(`SELECT COUNT(*) as n FROM crawled_pages WHERE error_msg IS NOT NULL`).get() as any).n
-  const matched = (db.prepare(`SELECT COUNT(DISTINCT p.id) as n FROM crawled_pages p JOIN page_sections s ON s.page_id=p.id JOIN snippet_matches m ON m.page_section_id=s.id`).get() as any).n
+  const row = getDB().prepare(`
+    SELECT
+      (SELECT COUNT(DISTINCT url) FROM aio_sources)                                         AS total,
+      (SELECT COUNT(*) FROM crawled_pages WHERE error_msg IS NULL)                          AS crawled,
+      (SELECT COUNT(*) FROM crawled_pages WHERE error_msg IS NOT NULL)                      AS errors,
+      (SELECT COUNT(DISTINCT p.id) FROM crawled_pages p
+       JOIN page_sections s  ON s.page_id = p.id
+       JOIN snippet_matches m ON m.page_section_id = s.id)                                  AS matched
+  `).get() as any
+  const { total, crawled, errors, matched } = row
   return { total, crawled, errors, pending: total - crawled - errors, matched }
 }
 
@@ -670,18 +678,19 @@ export function getCrawledPageRows(limit = 500, offset = 0): CrawledPageRow[] {
 // ─── Topics ───────────────────────────────────────────────────────────────────
 
 export function getClusterableKeywords(): ClusterInput[] {
-  const db = getDB()
-  const keywords = db.prepare(
-    `SELECT id, keyword FROM keywords WHERE status IN ('done', 'error')`
-  ).all() as { id: number; keyword: string }[]
+  const rows = getDB().prepare(
+    `SELECT k.id, k.keyword,
+            GROUP_CONCAT(DISTINCT a.domain_root) AS domains
+     FROM keywords k
+     LEFT JOIN aio_sources a ON a.keyword_id = k.id
+     WHERE k.status IN ('done', 'error')
+     GROUP BY k.id`
+  ).all() as { id: number; keyword: string; domains: string | null }[]
 
-  const getDomains = db.prepare(
-    `SELECT DISTINCT domain_root FROM aio_sources WHERE keyword_id = ?`
-  )
-  return keywords.map(kw => ({
-    id: kw.id,
-    keyword: kw.keyword,
-    domains: (getDomains.all(kw.id) as { domain_root: string }[]).map(r => r.domain_root)
+  return rows.map(r => ({
+    id: r.id,
+    keyword: r.keyword,
+    domains: r.domains ? r.domains.split(',').filter(Boolean) : []
   }))
 }
 
@@ -728,14 +737,30 @@ export function insertTopics(clusters: Cluster[]): void {
 }
 
 export function getTopics(): TopicRow[] {
+  // Pre-aggregate domain stats once, then use window functions to pick top/best per topic.
+  // This replaces 4 correlated subqueries that each re-scanned aio_sources per topic row.
   return getDB().prepare(
-    `SELECT
+    `WITH domain_agg AS (
+       SELECT tk.topic_id,
+              a.domain_root,
+              COUNT(*)         AS cnt,
+              MIN(a.position)  AS best_pos
+       FROM aio_sources a
+       JOIN topic_keywords tk ON tk.keyword_id = a.keyword_id
+       WHERE a.domain_root != '' AND a.position BETWEEN 1 AND 10
+       GROUP BY tk.topic_id, a.domain_root
+     ),
+     ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY cnt DESC)      AS rn_cnt,
+              ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY best_pos ASC)  AS rn_pos
+       FROM domain_agg
+     )
+     SELECT
        t.id,
        t.label,
-       COUNT(tk.keyword_id)             AS memberCount,
-       ROUND(AVG(tk.similarity), 2)     AS avgSimilarity,
-
-       -- Top 5 keywords by similarity, pipe-separated
+       COUNT(tk.keyword_id)         AS memberCount,
+       ROUND(AVG(tk.similarity), 2) AS avgSimilarity,
        (SELECT GROUP_CONCAT(sub.keyword, '|')
         FROM (SELECT k2.keyword
               FROM topic_keywords tk2
@@ -744,49 +769,14 @@ export function getTopics(): TopicRow[] {
               ORDER BY tk2.similarity DESC
               LIMIT 5) sub
        ) AS topKeywords,
-
-       -- Domain that appears most often across all keywords in this topic
-       (SELECT sub.domain_root
-        FROM (SELECT a.domain_root, COUNT(*) AS cnt
-              FROM aio_sources a
-              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
-              WHERE tk2.topic_id = t.id AND a.domain_root != ''
-                AND a.position BETWEEN 1 AND 10
-              GROUP BY a.domain_root
-              ORDER BY cnt DESC LIMIT 1) sub
-       ) AS topDomain,
-
-       (SELECT sub.cnt
-        FROM (SELECT a.domain_root, COUNT(*) AS cnt
-              FROM aio_sources a
-              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
-              WHERE tk2.topic_id = t.id AND a.domain_root != ''
-                AND a.position BETWEEN 1 AND 10
-              GROUP BY a.domain_root
-              ORDER BY cnt DESC LIMIT 1) sub
-       ) AS topDomainCount,
-
-       -- Domain with the best (lowest) AIO position across all keywords in this topic
-       (SELECT sub.domain_root
-        FROM (SELECT a.domain_root, MIN(a.position) AS best_pos
-              FROM aio_sources a
-              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
-              WHERE tk2.topic_id = t.id AND a.position BETWEEN 1 AND 10
-              GROUP BY a.domain_root
-              ORDER BY best_pos ASC LIMIT 1) sub
-       ) AS bestDomain,
-
-       (SELECT sub.best_pos
-        FROM (SELECT a.domain_root, MIN(a.position) AS best_pos
-              FROM aio_sources a
-              JOIN topic_keywords tk2 ON tk2.keyword_id = a.keyword_id
-              WHERE tk2.topic_id = t.id AND a.position BETWEEN 1 AND 10
-              GROUP BY a.domain_root
-              ORDER BY best_pos ASC LIMIT 1) sub
-       ) AS bestDomainPosition
-
+       td.domain_root  AS topDomain,
+       td.cnt          AS topDomainCount,
+       bd.domain_root  AS bestDomain,
+       bd.best_pos     AS bestDomainPosition
      FROM topics t
      LEFT JOIN topic_keywords tk ON tk.topic_id = t.id
+     LEFT JOIN ranked td ON td.topic_id = t.id AND td.rn_cnt = 1
+     LEFT JOIN ranked bd ON bd.topic_id = t.id AND bd.rn_pos = 1
      GROUP BY t.id
      ORDER BY memberCount DESC`
   ).all() as TopicRow[]

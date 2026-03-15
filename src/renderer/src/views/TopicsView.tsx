@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../store/app-store'
 import type { TopicRow, TopicKeywordRow } from '../../../types'
@@ -143,6 +143,11 @@ function TopicRow({
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(topic.label)
+
+  // Keep draft in sync if the label is updated externally (e.g. after query refetch)
+  useEffect(() => {
+    if (!editing) setDraft(topic.label)
+  }, [topic.label, editing])
 
   async function save(): Promise<void> {
     setEditing(false)

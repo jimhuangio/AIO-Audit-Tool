@@ -3,9 +3,10 @@
 import {
   getPendingKeywords,
   markKeywordQueued,
-  getJobCounts
+  getJobCounts,
+  getProjectMeta
 } from '../db'
-import { processKeyword } from './worker'
+import { processKeyword, setRunMeta, clearRunMeta } from './worker'
 import type { BrowserWindow } from 'electron'
 
 type Task = () => Promise<void>
@@ -106,6 +107,7 @@ export class FanoutScheduler {
   }
 
   async start(): Promise<void> {
+    setRunMeta(getProjectMeta())
     this.running = true
     this.startProgressBroadcast()
     this.drainPending()
@@ -131,6 +133,7 @@ export class FanoutScheduler {
     this.queue.pause()
     this.queue.clear()
     this.stopProgressBroadcast()
+    clearRunMeta()
     console.log('[scheduler] stopped')
   }
 
