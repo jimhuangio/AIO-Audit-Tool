@@ -172,6 +172,10 @@ CREATE INDEX idx_as_domain_f ON aio_sources(domain_full, position);
 CREATE INDEX idx_kw_status ON keywords(status);
 -- Hot path: fan-out tree traversal
 CREATE INDEX idx_kw_parent ON keywords(parent_id);
+-- Schema v3: crawler URL lookup (getAIOSourcesForUrl, getUncrawledAIOUrls)
+CREATE INDEX idx_as_url ON aio_sources(url);
+-- Schema v3: snippet match section lookup (insertSnippetMatches)
+CREATE INDEX idx_ps_page_pos ON page_sections(page_id, position_idx);
 ```
 
 ---
@@ -397,8 +401,10 @@ processURL(url)
 | Domain toggle re-render | <100ms | TanStack Query cache hit |
 | Keyword table scroll (50k rows) | 60fps | TanStack Table virtual scroll |
 | Fan-out throughput | 500 keywords/min | Rate-limited SimpleQueue concurrency |
-| Crawl throughput | 2 pages/sec | Concurrent undici, per-domain delay |
+| Crawl throughput | 2 pages/sec | Concurrent undici, per-domain round-robin |
 | SQLite write throughput | 10k rows/sec | WAL mode + batched transactions |
+| Keyword polling overhead | Near zero when idle | `refetchInterval` disabled unless `runStatus === 'running'` |
+| Topic clustering (5k keywords) | <2s | Single-query domain load; O(degree) similarity; O(1) BFS dequeue |
 
 ```sql
 -- Enable WAL mode on project open (critical for concurrent reads during writes)
@@ -443,6 +449,14 @@ Jaccard penalises hierarchical terms ("home loan" vs "home loan requirements" �
 **Inverted index** avoids O(K²) pairwise comparison:
 - Build `token → [keyword IDs]` and `domain → [keyword IDs]`
 - Only compare pairs that share at least one entry → O(K + E) where E = edges
+
+**BFS implementation:** Uses a head-pointer index instead of `queue.shift()` to avoid O(n) array reallocation per dequeue step.
+
+**Per-member similarity:** Computed by iterating the node's existing edge-weight map (O(degree)) rather than comparing against every other member (O(n²)). Singletons (no edges) get similarity = 0.
+
+**`getClusterableKeywords` query:** Single SQL JOIN with `GROUP_CONCAT(DISTINCT domain_root)` — replaced the prior N+1 pattern (one query per keyword) that blocked the main process on large datasets.
+
+**`getTopics` query:** Uses a CTE to pre-aggregate `(topic_id, domain_root, cnt, best_pos)` once, then applies `ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY ...)` to select the top/best domain per topic. This replaced four correlated subqueries that each re-scanned `aio_sources` per topic row.
 
 ---
 

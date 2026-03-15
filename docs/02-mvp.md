@@ -120,6 +120,30 @@
 - [x] **AIO Visibility Score bar** — mini progress bar relative to max score shown in Score column
 - [x] **Clear Project Data** — "Danger Zone" in Setup with two-step inline confirm; FK-safe DELETE preserves `project` settings
 - [x] **Clear DataForSEO credentials** — red Clear button next to Save/Test in API Credentials section
+- [x] **Column sorting on Keywords tab** — click any column header to sort asc/desc (keyword, status, depth, AIO count, domain position columns)
+- [x] **AIO Audit Tool rebrand** — app renamed, Tombo Group logo added to sidebar linking to tombogroup.com
+- [x] **Git repository** — private repo at github.com/jimhuangio/AIO-Audit-Tool
+- [x] **Start run error display** — errors from `startRun()` surface in the job status bar rather than silently swallowed
+- [x] **Bug fixes** — SQL syntax error in `getTopics` (trailing comma); SortIcon defined inside component causing 3s unmount/remount cycle
+
+### ✅ Performance Optimisation Pass (Complete)
+
+- [x] **`getClusterableKeywords`** — N+1 per-keyword domain query replaced with single JOIN + `GROUP_CONCAT`
+- [x] **`getTopics`** — 4 correlated subqueries each re-scanning `aio_sources` per topic replaced with CTE + `ROW_NUMBER` window functions (pre-aggregate once)
+- [x] **`getProjectStats`** — 4 separate `COUNT` queries merged into single multi-scalar `SELECT`
+- [x] **`getCrawlStats`** — 4 separate queries merged into single multi-scalar `SELECT`
+- [x] **`getUncrawledAIOUrls`** — `NOT IN` subquery replaced with `LEFT JOIN … WHERE IS NULL` (index-friendly)
+- [x] **Schema v3** — added `idx_as_url ON aio_sources(url)` and `idx_ps_page_pos ON page_sections(page_id, position_idx)`
+- [x] **Migration runner** — multi-statement migrations now executed one statement at a time (avoids partial-failure)
+- [x] **Fanout meta cache** — `getProjectMeta()` called once at run start; cached in worker, cleared on stop
+- [x] **Crawler drain** — replaced O(n) `findIndex` per dispatch with per-domain sub-queues + round-robin O(1) dispatch
+- [x] **Clustering BFS** — `queue.shift()` O(n) replaced with head-pointer O(1)
+- [x] **Clustering similarity** — O(n²) member-vs-all loop replaced with O(degree) edge-weight iteration
+- [x] **Keyword polling** — `refetchInterval` only fires during active run (`runStatus === 'running'`); `staleTime: 2000` prevents redundant remount fetches
+- [x] **`domainPositionMaps` memo** — fixed dependency on unstable `useQueries` array reference; now keys on `dataUpdatedAt` timestamps
+- [x] **JSON pretty-print** — large SERP blobs no longer re-parsed on every render (`useMemo`)
+- [x] **Content source totals** — `totals` + `colMaxes` loops in `ContentSourcesTable` memoized on `rows`
+- [x] **Topic label draft** — `useEffect` syncs draft when `topic.label` changes externally after query refetch
 
 ### 🔲 Phase 5 — Polish + iOS
 

@@ -41,6 +41,18 @@ Phase 5 (Polish/iOS)    ░░░░░░░░░░░░░░░░░░�
 - AIO Positions heatmap legend + relative score progress bar
 - Clear Project Data (Danger Zone in Setup, FK-safe, preserves settings)
 - Clear DataForSEO credentials button
+- Column sorting on Keywords tab (click header, Excel-style)
+- AIO Audit Tool rebrand + Tombo Group logo in sidebar
+- Git repository initialised at github.com/jimhuangio/AIO-Audit-Tool
+
+**Performance optimisations (March 2026):**
+- DB: N+1 clustering query → single JOIN; `getTopics` correlated subqueries → CTE + window functions
+- DB: `getProjectStats` / `getCrawlStats` each collapsed from 4 round-trips to 1 query
+- DB: `NOT IN` → `LEFT JOIN` for uncrawled URL lookup; schema v3 adds 2 missing indexes
+- Fanout: `getProjectMeta` cached once per run instead of once per keyword
+- Crawler drain: O(n) `findIndex` → O(1) per-domain sub-queues with round-robin
+- Clustering BFS: `queue.shift()` O(n) → head pointer O(1); similarity O(n²) → O(degree)
+- Renderer: keyword polling only fires during active run; `domainPositionMaps` memo stabilised; large JSON blobs memoised; content-source totals memoised
 
 **Next step:** Phase 5 — auto-updater + onboarding wizard + Windows CI build.
 
@@ -57,6 +69,8 @@ Phase 5 (Polish/iOS)    ░░░░░░░░░░░░░░░░░░�
 7. **Zustand** — session-only global state; domain toggle (Root ↔ Subdomain) never persisted
 8. **White professional UI** — Tailwind CSS, gray-50/white palette; all dark-mode classes removed
 9. **All keywords in Topics** — singletons produce solo topics; no minimum cluster size enforced
+10. **Query-per-run meta cache** — `getProjectMeta()` fetched once at run start, not per keyword
+11. **CTE + window functions in getTopics** — pre-aggregates domain stats once instead of 4 correlated subqueries per topic row
 
 ---
 

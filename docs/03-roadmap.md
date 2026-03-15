@@ -124,6 +124,29 @@ Timeline (weeks from kickoff)
 | AIO Result Count column always visible | Dev | ✅ |
 | Clear Project Data (Danger Zone, FK-safe DELETE) | Dev | ✅ |
 | Clear DataForSEO credentials button | Dev | ✅ |
+| Column sorting on Keywords tab | Dev | ✅ |
+| AIO Audit Tool rebrand + Tombo Group logo | Dev | ✅ |
+| Git repository (github.com/jimhuangio/AIO-Audit-Tool) | Dev | ✅ |
+| Start run error visibility in status bar | Dev | ✅ |
+
+---
+
+## Performance Optimisation Pass ✅
+
+**Goal:** Eliminate known performance bottlenecks before Phase 5.
+
+| Task | Owner | Status |
+|------|-------|--------|
+| getClusterableKeywords N+1 → single JOIN | Dev | ✅ |
+| getTopics correlated subqueries → CTE + window functions | Dev | ✅ |
+| getProjectStats / getCrawlStats → single query each | Dev | ✅ |
+| getUncrawledAIOUrls NOT IN → LEFT JOIN | Dev | ✅ |
+| Schema v3: missing indexes on aio_sources(url) + page_sections(page_id, position_idx) | Dev | ✅ |
+| Fanout meta cache (one DB read per run, not per keyword) | Dev | ✅ |
+| Crawler drain O(n) findIndex → O(1) per-domain sub-queues | Dev | ✅ |
+| Clustering BFS head-pointer + O(degree) similarity | Dev | ✅ |
+| Keyword polling only during active run | Dev | ✅ |
+| React memoization fixes (domainPositionMaps, JSON parse, content totals, topic label draft) | Dev | ✅ |
 
 ---
 
