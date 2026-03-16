@@ -234,4 +234,4 @@ Week cadence (suggested):
 
 ---
 
-*← [iOS Transition](./06-ios-transition.md) | Next: [Crawler Research](./08-crawler-research.md) →*
+*← [Idea Inbox](./05-idea-inbox.md) | Next: [Crawler Research](./08-crawler-research.md) →*

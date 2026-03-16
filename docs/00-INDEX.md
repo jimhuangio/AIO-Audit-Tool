@@ -13,7 +13,6 @@
 | 03 | [Roadmap](./03-roadmap.md) | Phased delivery plan, milestones |
 | 04 | [Architecture](./04-architecture.md) | Technical decisions, stack rationale, schema |
 | 05 | [Idea Inbox](./05-idea-inbox.md) | Unvetted feature ideas, experiments, backlog |
-| 06 | [iOS Transition Guide](./06-ios-transition.md) | Path from Electron desktop → iOS app |
 | 07 | [Debugging & Planning Guide](./07-debugging-planning.md) | AI-assisted dev workflow, prompt patterns |
 | 08 | [Crawler Research](./08-crawler-research.md) | crawl4ai, Scrapling, and crawling strategy |
 | 09 | [Customer Communication](./09-customer-comms.md) | How to talk to non-technical stakeholders |
@@ -54,7 +53,7 @@ Phase 5 (Polish/iOS)    ░░░░░░░░░░░░░░░░░░�
 - Clustering BFS: `queue.shift()` O(n) → head pointer O(1); similarity O(n²) → O(degree)
 - Renderer: keyword polling only fires during active run; `domainPositionMaps` memo stabilised; large JSON blobs memoised; content-source totals memoised
 
-**Next step:** Phase 5 — auto-updater + onboarding wizard + Windows CI build.
+**Next step:** Phase 5 — auto-updater + onboarding wizard + Windows CI build + dark mode.
 
 ---
 

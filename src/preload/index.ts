@@ -42,6 +42,9 @@ const api = {
   mcpTestKey: (apiKey: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('mcp:testKey', apiKey),
 
+  geminiTestKey: (apiKey: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('gemini:testKey', apiKey),
+
   mcpConnect: (): Promise<{ connected: boolean }> =>
     ipcRenderer.invoke('mcp:connect'),
 
@@ -89,6 +92,13 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, counts: JobCounts): void => callback(counts)
     ipcRenderer.on('run:progress', handler)
     return () => ipcRenderer.removeListener('run:progress', handler)
+  },
+
+  // Fired when the run completes naturally (enrichment done, scheduler self-stopped)
+  onRunComplete: (callback: () => void): (() => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('run:complete', handler)
+    return () => ipcRenderer.removeListener('run:complete', handler)
   },
 
   // ─── Reports ──────────────────────────────────────────────────────────────
@@ -154,6 +164,12 @@ const api = {
   },
 
   // ─── Topics ───────────────────────────────────────────────────────────────
+  onTopicsUpdated: (callback: () => void): (() => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('topics:updated', handler)
+    return () => ipcRenderer.removeListener('topics:updated', handler)
+  },
+
   runTopicClustering: (): Promise<{ count: number }> =>
     ipcRenderer.invoke('topics:run'),
 

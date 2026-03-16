@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../store/app-store'
 import type { JobCounts } from '../../../types'
 
 export function JobStatusBar(): JSX.Element {
   const { jobCounts, setJobCounts, runStatus, setRunStatus } = useAppStore()
+  const queryClient = useQueryClient()
   const [runError, setRunError] = useState<string>('')
 
   // Subscribe to progress events from main process
@@ -13,6 +15,15 @@ export function JobStatusBar(): JSX.Element {
     })
     return unsub
   }, [setJobCounts])
+
+  // Reset button state and refresh data when scheduler self-completes
+  useEffect(() => {
+    const unsub = window.api.onRunComplete(() => {
+      setRunStatus('idle')
+      queryClient.invalidateQueries({ queryKey: ['keywords'] })
+    })
+    return unsub
+  }, [setRunStatus, queryClient])
 
   const total = Object.values(jobCounts).reduce((a, b) => a + b, 0)
   const progress = total > 0 ? Math.round((jobCounts.done / total) * 100) : 0

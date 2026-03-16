@@ -51,6 +51,12 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
   // DataForSEO API key (base64-encoded login:password)
   const [dfsApiKey, setDfsApiKey] = useState('')
 
+  // Gemini API key
+  const [geminiApiKey, setGeminiApiKey] = useState('')
+  const [geminiSaveMsg, setGeminiSaveMsg] = useState('')
+  const [geminiTestMsg, setGeminiTestMsg] = useState('')
+  const [geminiTesting, setGeminiTesting] = useState(false)
+
   // Generic "other APIs" entries
   const [customEntries, setCustomEntries] = useState<{ service: string; key: string; value: string }[]>([])
   const [addingNew, setAddingNew] = useState(false)
@@ -67,8 +73,10 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
     const dfs = store['dataforseo'] ?? {}
     setDfsApiKey(dfs.apiKey ?? '')
 
+    setGeminiApiKey(store['gemini']?.apiKey ?? '')
+
     const entries = Object.entries(store)
-      .filter(([svc]) => svc !== 'dataforseo')
+      .filter(([svc]) => svc !== 'dataforseo' && svc !== 'gemini')
       .flatMap(([svc, fields]) =>
         Object.entries(fields).map(([key, value]) => ({ service: svc, key, value }))
       )
@@ -108,6 +116,33 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
     queryClient.invalidateQueries({ queryKey: ['credentials'] })
     setSaveMsg('Cleared.')
     setTimeout(() => setSaveMsg(''), 2000)
+  }
+
+  async function handleSaveGemini(): Promise<void> {
+    await window.api.saveCredentials('gemini', { apiKey: geminiApiKey })
+    queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    setGeminiSaveMsg('Saved.')
+    setTimeout(() => setGeminiSaveMsg(''), 2000)
+  }
+
+  async function handleTestGemini(): Promise<void> {
+    setGeminiTesting(true)
+    setGeminiTestMsg('')
+    try {
+      await window.api.geminiTestKey(geminiApiKey)
+      setGeminiTestMsg('✓ Connected')
+      setTimeout(() => setGeminiTestMsg(''), 3000)
+    } catch (err) {
+      setGeminiTestMsg(`✗ ${String(err).replace('Error: ', '')}`)
+    } finally {
+      setGeminiTesting(false)
+    }
+  }
+
+  async function handleClearGemini(): Promise<void> {
+    await window.api.removeCredentials('gemini')
+    setGeminiApiKey('')
+    queryClient.invalidateQueries({ queryKey: ['credentials'] })
   }
 
   async function handleSaveCustom(service: string, key: string, value: string): Promise<void> {
@@ -191,6 +226,56 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
             {testMsg && (
               <span className={`text-xs ${testMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
                 {testMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Gemini */}
+      <div className="mb-5">
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Google Gemini
+        </div>
+        <div className="space-y-3 pl-1">
+          <Field
+            label="API Key"
+            hint="Used for AI-powered topic clustering. Get a key at aistudio.google.com"
+          >
+            <input
+              type="password"
+              value={geminiApiKey}
+              onChange={(e) => setGeminiApiKey(e.target.value)}
+              className={inputCls}
+              placeholder="AIza..."
+            />
+          </Field>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleSaveGemini}
+              disabled={!geminiApiKey}
+              className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleTestGemini}
+              disabled={geminiTesting || !geminiApiKey}
+              className="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 text-gray-700 rounded transition-colors border border-gray-300"
+            >
+              {geminiTesting ? 'Testing…' : 'Test'}
+            </button>
+            <button
+              onClick={handleClearGemini}
+              disabled={!geminiApiKey}
+              className="px-4 py-1.5 text-xs bg-white hover:bg-red-50 disabled:opacity-40 text-red-500 rounded transition-colors border border-red-200 hover:border-red-300"
+            >
+              Clear
+            </button>
+            {geminiSaveMsg && <span className="text-xs text-green-600">{geminiSaveMsg}</span>}
+            {geminiTestMsg && (
+              <span className={`text-xs ${geminiTestMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+                {geminiTestMsg}
               </span>
             )}
           </div>
@@ -342,19 +427,19 @@ function ProjectSettingsSection({
   setMcpConnected
 }: {
   project: ProjectMeta
-  setProject: (p: ProjectMeta) => void
+  setProject: (p: ProjectMeta | null) => void
   mcpConnected: boolean
   setMcpConnected: (v: boolean) => void
 }): JSX.Element {
   const queryClient = useQueryClient()
+  const { setRunStatus, setJobCounts } = useAppStore()
   const [form, setForm] = useState<Partial<ProjectMeta>>(project)
   const [exclusionInput, setExclusionInput] = useState((project.exclusionKeywords ?? []).join('\n'))
   const [saving, setSaving] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const [connectError, setConnectError] = useState('')
-  const [confirmClear, setConfirmClear] = useState(false)
-  const [clearing, setClearing] = useState(false)
+  const [closing, setClosing] = useState(false)
 
   useEffect(() => {
     setForm(project)
@@ -392,15 +477,17 @@ function ProjectSettingsSection({
     }
   }
 
-  async function handleClearData(): Promise<void> {
-    setClearing(true)
+  async function handleCloseProject(): Promise<void> {
+    setClosing(true)
     try {
-      await window.api.clearProjectData()
-      // Invalidate every query so all tabs reflect the empty state
-      await queryClient.invalidateQueries()
-      setConfirmClear(false)
+      await window.api.closeProject()
+      queryClient.clear()
+      setRunStatus('idle')
+      setJobCounts({ pending: 0, queued: 0, running: 0, done: 0, error: 0 })
+      setMcpConnected(false)
+      setProject(null)
     } finally {
-      setClearing(false)
+      setClosing(false)
     }
   }
 
@@ -531,44 +618,19 @@ function ProjectSettingsSection({
         {saveMsg && <span className="text-xs text-green-600">{saveMsg}</span>}
       </div>
 
-      {/* Danger Zone */}
-      <div className="mt-10 pt-6 border-t border-red-100">
-        <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">
-          Danger Zone
-        </h3>
+      {/* Close Project */}
+      <div className="mt-10 pt-6 border-t border-gray-200">
         <div className="pl-1">
-          <p className="text-xs text-gray-500 mb-3">
-            Clear all research data (keywords, AIO results, crawl data, topics) to start a fresh session.
-            Project settings and credentials are kept.
+          <button
+            onClick={handleCloseProject}
+            disabled={closing}
+            className="px-4 py-1.5 text-xs bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-600 rounded border border-gray-300 hover:border-gray-400 transition-colors"
+          >
+            {closing ? 'Closing…' : 'Close project'}
+          </button>
+          <p className="text-xs text-gray-400 mt-2">
+            Closes this project file. You can open or create another without restarting the app.
           </p>
-
-          {!confirmClear ? (
-            <button
-              onClick={() => setConfirmClear(true)}
-              className="px-4 py-1.5 text-xs bg-white hover:bg-red-50 text-red-500 rounded border border-red-200 hover:border-red-300 transition-colors"
-            >
-              Clear all data…
-            </button>
-          ) : (
-            <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded">
-              <span className="text-xs text-red-700 font-medium">
-                This cannot be undone. Are you sure?
-              </span>
-              <button
-                onClick={handleClearData}
-                disabled={clearing}
-                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded transition-colors"
-              >
-                {clearing ? 'Clearing…' : 'Yes, clear everything'}
-              </button>
-              <button
-                onClick={() => setConfirmClear(false)}
-                className="px-3 py-1 text-xs bg-white hover:bg-gray-50 text-gray-600 rounded border border-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>

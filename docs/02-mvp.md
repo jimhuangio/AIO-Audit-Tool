@@ -110,6 +110,22 @@
 - [x] **Re-cluster on demand** — "Run Clustering" button clears and rebuilds all topics
 - [x] **DB persistence** — `topics` + `topic_keywords` tables; survives app restart
 
+### ✅ Post-Phase 4 — Enrichment, Parallel Processing & Gemini Clustering (Complete)
+
+- [x] **Keyword enrichment** — after SERP harvest, each keyword is enriched with search volume, search intent, and Google taxonomy category via three parallel DataForSEO API calls
+- [x] **Est. Monthly Volume column** — `keywords` table gains `search_volume`, `search_intent`, `category_id`, `category_name`; displayed in Keywords view with color-coded intent badges
+- [x] **Schema v6 migration** — `ALTER TABLE keywords ADD COLUMN category_id INTEGER, category_name TEXT`
+- [x] **Google Ads keyword sanitization** — strips special chars (`?!+"`), filters keywords >10 words before volume API call; maps sanitized → original via reverse lookup
+- [x] **Intent field fix** — field is `keyword_intent.label` (not `main_intent`); nested response parse `result[0].items[]`
+- [x] **Category-based clustering partition** — local algorithm never clusters keywords from different Google taxonomy categories; fixes "brain cancer" + "lung cancer" merging into one topic
+- [x] **Gemini semantic clustering** — `gemini-2.5-pro` used for clustering when a Gemini API key is configured; falls back to local algorithm if unavailable or on error
+- [x] **Gemini API key setup** — "Google Gemini" section in Setup view; Save / Test / Clear buttons; key stored in global credentials store
+- [x] **Parallel crawler + fanout** — crawler auto-starts as AIO source URLs are discovered during a run (`feedURLs()` wired via `onNewURLs` callback); no need to manually start the crawler after a run
+- [x] **Live topic clustering** — topics rebuild automatically every 10 completed keywords during a run (`scheduleRecluster()` debounced 2s); final recluster runs after enrichment completes
+- [x] **Topics view redesign** — keywords listed vertically within each row (no side panel); Est. Monthly Traffic column shows combined search volume per topic; each keyword shows its volume (`/mo`) and intent badge inline
+- [x] **`run:complete` IPC event** — main process broadcasts when run fully completes (including enrichment + final clustering); renderer resets button state and refreshes keyword data automatically
+- [x] **Close project fix** — `crawlScheduler.stop()` now called on `project:close` to prevent interval firing against a closed DB
+
 ### ✅ Post-Phase 4 — UX & Analysis Enhancements (Complete)
 
 - [x] **Keywords view text filter** — filter keyword rows by text substring in real time
@@ -145,7 +161,7 @@
 - [x] **Content source totals** — `totals` + `colMaxes` loops in `ContentSourcesTable` memoized on `rows`
 - [x] **Topic label draft** — `useEffect` syncs draft when `topic.label` changes externally after query refetch
 
-### 🔲 Phase 5 — Polish + iOS
+### 🔲 Phase 5 — Polish
 
 ---
 

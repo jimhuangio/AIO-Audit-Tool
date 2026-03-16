@@ -59,8 +59,11 @@ export interface KeywordRow {
   doneAt: number | null
   errorMsg: string | null
   aioSourceCount: number
+  searchVolume: number | null
+  searchIntent: string | null
   domainPosition?: number  // set when queried via domain filter
 }
+
 
 export interface RunConfig {
   concurrency: number      // parallel API calls (default: 5)
@@ -144,6 +147,7 @@ export interface TopicRow {
   topDomainCount: number | null    // how many times topDomain appeared
   bestDomain: string | null        // domain with the best (lowest) AIO position in topic
   bestDomainPosition: number | null
+  totalSearchVolume: number | null // sum of search_volume for all keywords in topic
 }
 
 export interface TopicKeywordRow {
@@ -152,4 +156,6 @@ export interface TopicKeywordRow {
   similarity: number
   depth: number
   aioSourceCount: number
+  searchVolume: number | null
+  searchIntent: string | null
 }

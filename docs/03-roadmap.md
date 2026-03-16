@@ -131,6 +131,31 @@ Timeline (weeks from kickoff)
 
 ---
 
+## Post-Phase 4 — Enrichment, Parallel Processing & Gemini Clustering ✅
+
+**Goal:** Enrich keywords with volume/intent/category data; parallelize crawler with fanout; improve clustering quality with Gemini.
+
+| Task | Owner | Status |
+|------|-------|--------|
+| Keyword enrichment: search volume (Google Ads API) | Dev | ✅ |
+| Keyword enrichment: search intent (Labs API) | Dev | ✅ |
+| Keyword enrichment: Google taxonomy category (Labs API) | Dev | ✅ |
+| Schema v6: category_id + category_name columns on keywords | Dev | ✅ |
+| Volume API sanitization (strip ?!+", filter >10-word keywords) | Dev | ✅ |
+| Intent + categories nested response parse fix (result[0].items[]) | Dev | ✅ |
+| Est. Monthly Volume + intent badge columns in Keywords view | Dev | ✅ |
+| Category-based clustering partition (different taxonomy IDs never co-cluster) | Dev | ✅ |
+| Gemini semantic clustering via gemini-2.5-pro REST API | Dev | ✅ |
+| Gemini API key setup in Setup view (Save / Test / Clear) | Dev | ✅ |
+| Parallel crawler: feedURLs() auto-starts crawler as AIO URLs are discovered | Dev | ✅ |
+| Live topic clustering: scheduleRecluster() debounced every 10 completions | Dev | ✅ |
+| Topics view redesign: keywords listed vertically, no side panel | Dev | ✅ |
+| Est. Monthly Traffic column on Topics view (combined search_volume per topic) | Dev | ✅ |
+| run:complete IPC event: auto-reset button + refresh keyword data | Dev | ✅ |
+| Close project fix: crawlScheduler.stop() on project:close | Dev | ✅ |
+
+---
+
 ## Performance Optimisation Pass ✅
 
 **Goal:** Eliminate known performance bottlenecks before Phase 5.
@@ -161,12 +186,6 @@ Timeline (weeks from kickoff)
 - [ ] Scheduled re-runs (cron: re-fetch keywords older than N days)
 - [ ] Full DB copy export (project file portability)
 - [ ] Windows build (GitHub Actions CI)
-
-### iOS Companion (Exploratory)
-- [ ] React Native or SwiftUI read-only viewer
-- [ ] iCloud sync of `.aio-project.db` (or export to JSON)
-- [ ] Browse: topics, position report, keyword detail
-- [ ] No write/harvest on iOS (API calls stay on desktop)
 
 ---
 

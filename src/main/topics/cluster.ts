@@ -7,7 +7,8 @@ import { tokenize } from '../crawler/snippet-match'
 export interface ClusterInput {
   id: number
   keyword: string
-  domains: string[]   // AIO domain_root values for this keyword
+  domains: string[]        // AIO domain_root values for this keyword
+  categoryId: number | null  // Google taxonomy category ID from DataForSEO
 }
 
 export interface Cluster {
@@ -64,6 +65,30 @@ function combinedScore(
 }
 
 export function clusterKeywords(inputs: ClusterInput[]): Cluster[] {
+  if (inputs.length === 0) return []
+
+  // If categories are available for at least some keywords, partition by category first.
+  // This prevents keywords from different Google taxonomy categories from ever merging,
+  // even when they share common tokens (e.g. "brain cancer" vs "lung cancer").
+  const hasCategoryData = inputs.some(k => k.categoryId !== null)
+  if (hasCategoryData) {
+    const partitions = new Map<number | 'none', ClusterInput[]>()
+    for (const kw of inputs) {
+      const key = kw.categoryId ?? 'none'
+      if (!partitions.has(key)) partitions.set(key, [])
+      partitions.get(key)!.push(kw)
+    }
+    const all: Cluster[] = []
+    for (const partition of partitions.values()) {
+      all.push(...clusterPartition(partition))
+    }
+    return all.sort((a, b) => b.members.length - a.members.length)
+  }
+
+  return clusterPartition(inputs)
+}
+
+function clusterPartition(inputs: ClusterInput[]): Cluster[] {
   if (inputs.length === 0) return []
 
   // Pre-compute token sets

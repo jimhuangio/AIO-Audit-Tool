@@ -49,6 +49,9 @@ export class CrawlScheduler {
   // Per-domain last-request timestamp for rate limiting
   private domainLastRequest = new Map<string, number>()
 
+  // Tracks URLs already queued to avoid duplicates when fed incrementally
+  private queuedURLs = new Set<string>()
+
   constructor(private concurrency = DEFAULT_CONCURRENCY) {}
 
   setWindow(win: BrowserWindow): void {
@@ -80,7 +83,34 @@ export class CrawlScheduler {
     this.domainQueues.clear()
     this.domainOrder = []
     this.domainCursor = 0
+    this.queuedURLs.clear()
     this.stopProgressBroadcast()
+  }
+
+  // Feed new URLs discovered during fanout — auto-starts crawler if not already running
+  feedURLs(urls: string[]): void {
+    const fresh = urls.filter(u => !this.queuedURLs.has(u))
+    if (fresh.length === 0) return
+
+    if (!this.active) {
+      this.active = true
+      this.paused = false
+      this.startProgressBroadcast()
+    }
+
+    for (const url of fresh) {
+      try {
+        const domain = new URL(url).hostname
+        if (!this.domainQueues.has(domain)) {
+          this.domainQueues.set(domain, [])
+          this.domainOrder.push(domain)
+        }
+        this.domainQueues.get(domain)!.push(url)
+        this.queuedURLs.add(url)
+      } catch { /* skip malformed URLs */ }
+    }
+
+    this.drain()
   }
 
   get isRunning(): boolean {
@@ -98,6 +128,7 @@ export class CrawlScheduler {
     this.domainQueues.clear()
     this.domainOrder = []
     this.domainCursor = 0
+    this.queuedURLs.clear()
 
     for (const url of urls) {
       try {
@@ -107,6 +138,7 @@ export class CrawlScheduler {
           this.domainOrder.push(domain)
         }
         this.domainQueues.get(domain)!.push(url)
+        this.queuedURLs.add(url)
       } catch { /* skip malformed URLs */ }
     }
     console.log(`[crawl] loaded ${urls.length} uncrawled URLs across ${this.domainOrder.length} domains`)

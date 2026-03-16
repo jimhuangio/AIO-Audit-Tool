@@ -59,9 +59,15 @@ function runMigrations(db: Database.Database): void {
     const next = current + 1
     const sql = MIGRATIONS[next]
     if (sql) {
-      // Execute each statement separately to avoid partial-failure issues
+      // Execute each statement separately to avoid partial-failure issues.
+      // Swallow "duplicate column name" errors so repair migrations (which
+      // re-run ALTER TABLE ADD COLUMN) are safe to run on already-patched DBs.
       for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
-        db.exec(stmt + ';')
+        try {
+          db.exec(stmt + ';')
+        } catch (err) {
+          if (!String(err).includes('duplicate column name')) throw err
+        }
       }
     }
     db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(String(next))
@@ -186,6 +192,7 @@ export function getKeywordRows(limit = 500, offset = 0): KeywordRow[] {
       `SELECT
         k.id, k.keyword, k.depth, k.status, k.parent_id as parentId,
         k.done_at as doneAt, k.error_msg as errorMsg,
+        k.search_volume as searchVolume, k.search_intent as searchIntent,
         COUNT(a.id) as aioSourceCount
       FROM keywords k
       LEFT JOIN aio_sources a ON a.keyword_id = k.id
@@ -679,17 +686,18 @@ export function getCrawledPageRows(limit = 500, offset = 0): CrawledPageRow[] {
 
 export function getClusterableKeywords(): ClusterInput[] {
   const rows = getDB().prepare(
-    `SELECT k.id, k.keyword,
+    `SELECT k.id, k.keyword, k.category_id AS categoryId,
             GROUP_CONCAT(DISTINCT a.domain_root) AS domains
      FROM keywords k
      LEFT JOIN aio_sources a ON a.keyword_id = k.id
      WHERE k.status IN ('done', 'error')
      GROUP BY k.id`
-  ).all() as { id: number; keyword: string; domains: string | null }[]
+  ).all() as { id: number; keyword: string; categoryId: number | null; domains: string | null }[]
 
   return rows.map(r => ({
     id: r.id,
     keyword: r.keyword,
+    categoryId: r.categoryId ?? null,
     domains: r.domains ? r.domains.split(',').filter(Boolean) : []
   }))
 }
@@ -701,6 +709,44 @@ export function clearTopics(): void {
 
 // Wipes all research data for a fresh session.
 // Preserves the `project` and `_meta` tables (settings + schema version).
+// ─── Keyword enrichment (search volume + intent) ──────────────────────────────
+
+// All done/error keywords that have not yet been enriched
+export function getUnenrichedKeywords(): { id: number; keyword: string }[] {
+  return getDB()
+    .prepare(
+      `SELECT id, keyword FROM keywords
+       WHERE status IN ('done', 'error')
+         AND (search_volume IS NULL OR search_intent IS NULL OR category_id IS NULL)`
+    )
+    .all() as { id: number; keyword: string }[]
+}
+
+export function upsertKeywordEnrichment(
+  updates: { id: number; searchVolume: number | null; searchIntent: string | null; categoryId: number | null; categoryName: string | null }[]
+): void {
+  const stmt = getDB().prepare(
+    `UPDATE keywords SET search_volume = ?, search_intent = ?, category_id = ?, category_name = ? WHERE id = ?`
+  )
+  const tx = getDB().transaction(() => {
+    for (const u of updates) {
+      stmt.run(u.searchVolume, u.searchIntent, u.categoryId, u.categoryName, u.id)
+    }
+  })
+  tx()
+}
+
+export function getEnrichStats(): { total: number; enriched: number } {
+  const row = getDB().prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN search_volume IS NOT NULL OR search_intent IS NOT NULL THEN 1 ELSE 0 END) AS enriched
+    FROM keywords
+    WHERE status IN ('done', 'error')
+  `).get() as any
+  return { total: row.total ?? 0, enriched: row.enriched ?? 0 }
+}
+
 export function clearProjectData(): void {
   getDB().exec(`
     DELETE FROM snippet_matches;
@@ -772,9 +818,11 @@ export function getTopics(): TopicRow[] {
        td.domain_root  AS topDomain,
        td.cnt          AS topDomainCount,
        bd.domain_root  AS bestDomain,
-       bd.best_pos     AS bestDomainPosition
+       bd.best_pos     AS bestDomainPosition,
+       SUM(k.search_volume) AS totalSearchVolume
      FROM topics t
      LEFT JOIN topic_keywords tk ON tk.topic_id = t.id
+     LEFT JOIN keywords k ON k.id = tk.keyword_id
      LEFT JOIN ranked td ON td.topic_id = t.id AND td.rn_cnt = 1
      LEFT JOIN ranked bd ON bd.topic_id = t.id AND bd.rn_pos = 1
      GROUP BY t.id
@@ -785,7 +833,9 @@ export function getTopics(): TopicRow[] {
 export function getTopicKeywords(topicId: number): TopicKeywordRow[] {
   return getDB().prepare(
     `SELECT k.id, k.keyword, tk.similarity, k.depth,
-            COUNT(a.id) AS aioSourceCount
+            COUNT(a.id) AS aioSourceCount,
+            k.search_volume AS searchVolume,
+            k.search_intent AS searchIntent
      FROM topic_keywords tk
      JOIN keywords k ON k.id = tk.keyword_id
      LEFT JOIN aio_sources a ON a.keyword_id = k.id

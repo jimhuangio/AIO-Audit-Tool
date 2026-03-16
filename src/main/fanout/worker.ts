@@ -47,6 +47,7 @@ import {
 export interface WorkerCallbacks {
   onChildrenAdded: (childIds: number[]) => void
   onProgress: () => void
+  onNewURLs?: (urls: string[]) => void
 }
 
 export async function processKeyword(
@@ -80,6 +81,7 @@ export async function processKeyword(
     const aioSources = extractAIOSources(serpData)
     if (aioSources.length > 0) {
       insertAIOSources(keywordId, aioSources)
+      callbacks.onNewURLs?.(aioSources.map(s => s.url))
     }
 
     const paaQuestions = extractPAAQuestions(serpData)

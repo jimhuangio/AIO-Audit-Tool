@@ -73,18 +73,26 @@ Across all harvested keywords, for positions 1–10 in AIO source lists:
 - Matches AIO snippet text → most likely source section using TF-IDF + Jaccard similarity
 - Answers: "Google cited paragraph 3 under H2 'How to Compare Cards'"
 
-### 6. Topic Clustering
-- Groups all keywords (including singletons that don't cluster with others) by overlapping cited domains + AIO text similarity
-- Per-topic report: which domains dominate, highest-ranking domain per topic, most frequently cited domain per topic
+### 6. Keyword Enrichment
+After the SERP harvest, every keyword is enriched with:
+- **Est. Monthly Volume** — Google Ads search volume via DataForSEO
+- **Search Intent** — informational / navigational / commercial / transactional (color-coded badge)
+- **Google Taxonomy Category** — used to partition topic clustering for precision
+
+### 7. Topic Clustering
+- Two backends: **Gemini 2.5 Pro** (semantic, preferred when API key configured) or local algorithm (overlap coefficient + domain Jaccard)
+- Category partitioning ensures keywords in different Google taxonomy categories (e.g. "brain cancer symptoms" vs "lung cancer symptoms") are never merged into one topic
+- Per-topic report: **Est. Monthly Traffic** (combined search volume), which domains dominate, highest-ranking domain
+- Topics rebuild live during a run (every 10 keywords) — no need to manually trigger clustering
 - Useful for: "these 340 keywords are all in the 'credit card rewards' cluster; Nerdwallet owns it"
 
-### 7. Multi-Domain Keyword Comparison
+### 8. Multi-Domain Keyword Comparison
 - Add one or more competitor domains to the Keywords view
 - Each domain gets its own column showing its AIO position badge for that keyword
 - Live autocomplete domain suggestions as you type (Google-style)
 - Compare your domain vs. 3 competitors at a glance across all keywords
 
-### 8. Project File System
+### 9. Project File System
 - One `.aio-project.db` SQLite file per project
 - Open, close, share like a spreadsheet
 - No server, no cloud, no subscription database
@@ -118,7 +126,8 @@ Two hours later they have:
 |------|--------|
 | DataForSEO account required | API key stored globally in `userData/api-credentials.json`; Clear button removes it |
 | Firecrawl (optional) | Cloud JS-render fallback for JS-heavy pages; API key stored in same credentials store |
-| API costs | ~$0.003 per SERP task; 5,000 keywords × 3 task types = ~$45 |
+| Google Gemini (optional) | `gemini-2.5-pro` for semantic topic clustering; get a free key at aistudio.google.com; falls back to local algorithm if absent |
+| API costs | ~$0.003 per SERP task; 5,000 keywords × 3 task types = ~$45; enrichment adds volume/intent/category calls |
 | Rate limits | DataForSEO: 2,000 tasks/min; app throttles to 500/min default |
 | OS | macOS + Windows (Electron cross-platform build); Linux possible |
 | No cloud | All data local; user responsible for backups |

@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 6
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -30,15 +30,19 @@ CREATE TABLE IF NOT EXISTS project (
 );
 
 CREATE TABLE IF NOT EXISTS keywords (
-  id          INTEGER PRIMARY KEY,
-  keyword     TEXT NOT NULL,
-  parent_id   INTEGER REFERENCES keywords(id),
-  depth       INTEGER NOT NULL DEFAULT 0,
-  status      TEXT NOT NULL DEFAULT 'pending',
-  queued_at   INTEGER,
-  started_at  INTEGER,
-  done_at     INTEGER,
-  error_msg   TEXT,
+  id            INTEGER PRIMARY KEY,
+  keyword       TEXT NOT NULL,
+  parent_id     INTEGER REFERENCES keywords(id),
+  depth         INTEGER NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  queued_at     INTEGER,
+  started_at    INTEGER,
+  done_at       INTEGER,
+  error_msg     TEXT,
+  search_volume INTEGER,
+  search_intent TEXT,
+  category_id   INTEGER,
+  category_name TEXT,
   UNIQUE(keyword)
 );
 
@@ -140,5 +144,20 @@ export const MIGRATIONS: Record<number, string> = {
   3: [
     `CREATE INDEX IF NOT EXISTS idx_as_url ON aio_sources(url);`,
     `CREATE INDEX IF NOT EXISTS idx_ps_page_pos ON page_sections(page_id, position_idx);`
+  ].join('\n'),
+  4: [
+    `ALTER TABLE keywords ADD COLUMN search_volume INTEGER;`,
+    `ALTER TABLE keywords ADD COLUMN search_intent TEXT;`
+  ].join('\n'),
+  // Repair migration: re-runs the same ALTERs for databases created at v4
+  // without the columns (CREATE_TABLES was missing them). Errors are swallowed
+  // by the migration runner for "duplicate column name" — safe to run twice.
+  5: [
+    `ALTER TABLE keywords ADD COLUMN search_volume INTEGER;`,
+    `ALTER TABLE keywords ADD COLUMN search_intent TEXT;`
+  ].join('\n'),
+  6: [
+    `ALTER TABLE keywords ADD COLUMN category_id INTEGER;`,
+    `ALTER TABLE keywords ADD COLUMN category_name TEXT;`
   ].join('\n')
 }

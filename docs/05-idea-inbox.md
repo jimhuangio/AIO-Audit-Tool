@@ -153,4 +153,4 @@
 
 ---
 
-*← [Architecture](./04-architecture.md) | Next: [iOS Transition](./06-ios-transition.md) →*
+*← [Architecture](./04-architecture.md) | Next: [Debugging & Planning Guide](./07-debugging-planning.md) →*

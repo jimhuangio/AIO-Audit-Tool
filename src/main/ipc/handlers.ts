@@ -31,9 +31,10 @@ import {
   insertTopics,
   getTopics,
   getTopicKeywords,
-  updateTopicLabel
+  updateTopicLabel,
 } from '../db'
-import { clusterKeywords } from '../topics/cluster'
+import { runClustering } from '../topics/run'
+import { testGeminiKey } from '../gemini/client'
 import { crawlScheduler } from '../crawler/scheduler'
 import { mcpClient, DataForSEOClient } from '../mcp/client'
 import { scheduler } from '../fanout/scheduler'
@@ -71,6 +72,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('project:close', () => {
     scheduler.stop()
+    crawlScheduler.stop()
     mcpClient.disconnect()
     closeProject()
   })
@@ -318,12 +320,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   // ─── Topics ───────────────────────────────────────────────────────────────
 
-  ipcMain.handle('topics:run', () => {
+  ipcMain.handle('topics:run', async () => {
     const inputs = getClusterableKeywords()
-    const clusters = clusterKeywords(inputs)
+    const clusters = await runClustering(inputs)
     clearTopics()
     insertTopics(clusters)
     return { count: clusters.length }
+  })
+
+  ipcMain.handle('gemini:testKey', async (_e, apiKey: string) => {
+    await testGeminiKey(apiKey)
+    return { ok: true }
   })
 
   ipcMain.handle('topics:getAll', () => getTopics())

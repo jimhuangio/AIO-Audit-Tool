@@ -86,7 +86,7 @@
 ```json
 {
   "dataforseo": { "apiKey": "<base64(login:password)>" },
-  "openai":     { "apiKey": "sk-..." }
+  "gemini":     { "apiKey": "AIza..." }
 }
 ```
 
@@ -150,7 +150,7 @@ See the full schema in `src/main/db/schema.ts`. Summary:
 | Table | Rows (typical) | Key Columns |
 |-------|---------------|-------------|
 | `project` | 1 | settings, credentials |
-| `keywords` | 1k–100k | keyword, depth, status, parent_id |
+| `keywords` | 1k–100k | keyword, depth, status, parent_id, search_volume, search_intent, category_id, category_name |
 | `serp_results` | 3× keywords | result_type, raw_json |
 | `aio_sources` | ≤10× keywords | position, url, domain_root, domain_full |
 | `paa_questions` | 0–8× keywords | question, ai_answer |
@@ -160,6 +160,12 @@ See the full schema in `src/main/db/schema.ts`. Summary:
 | `snippet_matches` | ≤3× aio_sources | match_score, match_method |
 | `topics` | 5–50 | label, keywords JSON |
 | `topic_keywords` | = keywords | similarity score |
+
+**Schema v6 additions:**
+```sql
+ALTER TABLE keywords ADD COLUMN category_id   INTEGER;
+ALTER TABLE keywords ADD COLUMN category_name TEXT;
+```
 
 ### Critical Indexes
 
@@ -245,6 +251,13 @@ interface FanoutAPI {
   getTopicKeywords(topicId: number): Promise<TopicKeywordRow[]>
   updateTopicLabel(topicId: number, label: string): Promise<void>
 
+  // Gemini
+  geminiTestKey(apiKey: string): Promise<void>
+
+  // Events (main → renderer)
+  onRunComplete(cb: () => void): () => void      // run fully finished; reset button + refresh keywords
+  onTopicsUpdated(cb: () => void): () => void    // live recluster during run; refresh topics view
+
   // Export
   exportCSV(table: string, useSubdomain: boolean): Promise<string | null>
   exportProjectCopy(): Promise<string | null>
@@ -284,21 +297,33 @@ SimpleQueue: enqueue each keyword
 │  6. Mark keyword status = 'done'       │
 └─────────────────────────────────────────┘
       │
+      ├─── onNewURLs callback ──────────────────────────────►
+      │                                              CrawlScheduler.feedURLs()
+      │                                              (auto-starts crawler;
+      │                                               runs in PARALLEL with fanout)
       ▼
-Crawl Queue (Phase 3)
-      │
+Enrichment (after all SERP work done)
+  Parallel API calls per keyword:
+  1. DataForSEO Google Ads: search_volume
+  2. DataForSEO Labs: search_intent (keyword_intent.label)
+  3. DataForSEO Labs: category_id + category_name
+  → upsertKeywordEnrichment() → keywords table
+
+      │  (every 10 completions during run, debounced 2s)
       ▼
-For each unique URL in aio_sources:
-  1. Fetch HTML → crawled_pages
-  2. Extract sections → page_sections
-  3. Match snippet → snippet_matches
+Topic Clustering (auto + on-demand)
+  If Gemini key configured:
+    clusterWithGemini() via gemini-2.5-pro REST API
+    → JSON schema response → Cluster[]
+  Else:
+    clusterKeywords() — local overlap coefficient + BFS
+    (partitioned by category_id — different categories never cluster)
+  → Clear + write topics + topic_keywords
+  → broadcast topics:updated → renderer refreshes Topics view
 
       │
       ▼
-Topic Clustering (Phase 4, on-demand)
-  1. Load done keywords + their AIO domains
-  2. clusterKeywords() → connected components
-  3. Clear + write topics + topic_keywords
+run:complete IPC event → renderer resets button state + refreshes keywords
 ```
 
 ---
@@ -417,17 +442,51 @@ PRAGMA cache_size=-64000;  -- 64MB cache
 
 ## Topic Clustering Algorithm
 
-**Algorithm:** Overlap coefficient + domain Jaccard → connected components (BFS)
+Two clustering backends are available, selected automatically based on credentials:
+
+### Gemini Semantic Clustering (preferred)
+
+When a Gemini API key is present (`gemini.apiKey` in the credentials store), clustering is performed by `gemini-2.5-pro` via the Generative Language REST API.
 
 ```
-For each pair of keywords that share ≥1 token OR ≥1 AIO domain:
+clusterWithGemini(keywords, apiKey)
+  │
+  ├── Batch keywords into groups of ≤800
+  │
+  └── For each batch:
+        POST /v1beta/models/gemini-2.5-pro:generateContent
+        body: { generationConfig: { responseMimeType: "application/json",
+                                    responseSchema, temperature: 0.1 } }
+        prompt: "Group the following N SEO keywords into semantic topic clusters..."
+        │
+        ▼
+        JSON response: { clusters: [{ label, keywords[] }] }
+        │
+        ▼
+        Map keyword strings → IDs via case-insensitive lookup → Cluster[]
+```
+
+- Batches up to 800 keywords per API call (well within the model's context window)
+- Falls back to local algorithm on any API error
+- Labels are generated by the model rather than N-gram counting
+
+### Local Clustering Algorithm (fallback)
+
+**Algorithm:** Category partition → overlap coefficient + domain Jaccard → connected components (BFS)
+
+```
+Step 1: Partition keywords by category_id
+  (keywords in different Google taxonomy categories never cluster together;
+   prevents "brain cancer symptoms" + "lung cancer symptoms" merging)
+
+Step 2: Within each partition, for pairs sharing ≥1 token OR ≥1 AIO domain:
   textScore   = |A ∩ B| / min(|A|, |B|)   ← overlap coefficient
   domainScore = |A ∩ B| / |A ∪ B|          ← Jaccard on cited domains
   combined    = textScore * 0.65 + domainScore * 0.35
 
   if combined ≥ 0.28: add edge A—B
 
-BFS over adjacency list → connected components = clusters
+Step 3: BFS over adjacency list → connected components = clusters
 No minimum size — singletons produce solo topics
 Cap at 300 members (keep highest-degree nodes)
 Label: top-3 most frequent normalized tokens
@@ -457,6 +516,45 @@ Jaccard penalises hierarchical terms ("home loan" vs "home loan requirements" �
 **`getClusterableKeywords` query:** Single SQL JOIN with `GROUP_CONCAT(DISTINCT domain_root)` — replaced the prior N+1 pattern (one query per keyword) that blocked the main process on large datasets.
 
 **`getTopics` query:** Uses a CTE to pre-aggregate `(topic_id, domain_root, cnt, best_pos)` once, then applies `ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY ...)` to select the top/best domain per topic. This replaced four correlated subqueries that each re-scanned `aio_sources` per topic row.
+
+---
+
+## Keyword Enrichment
+
+After the SERP harvest phase completes, every `done` keyword is enriched via three parallel DataForSEO API calls:
+
+| API | Endpoint | Field stored |
+|-----|----------|-------------|
+| Google Ads search volume | `/v3/keywords_data/google_ads/search_volume/live` | `search_volume` |
+| Labs search intent | `/v3/dataforseo_labs/google/search_intent/live` | `search_intent` (label: informational / navigational / commercial / transactional) |
+| Labs categories | `/v3/dataforseo_labs/google/categories_for_keywords/live` | `category_id`, `category_name` |
+
+**Volume API quirks:**
+- Google Ads rejects keywords containing `?`, `!`, `+`, or `"` → stripped before sending
+- Google Ads rejects keywords with >10 words → filtered out before sending
+- A sanitized→original reverse map restores results to the original keyword strings
+
+**Intent/categories response shape:**
+Both endpoints use two-level nesting — `tasks[0].result[0].items[]` (not `tasks[0].result[]`).
+
+---
+
+## Parallel Processing Architecture
+
+During a fanout run, three processes run concurrently:
+
+```
+FanoutScheduler.start()
+  │
+  ├── SimpleQueue: SERP harvest (rate-limited, N concurrent)
+  │     │  onProgress callback → scheduleRecluster() debounced 2s every 10 completions
+  │     │  onNewURLs callback → CrawlScheduler.feedURLs() → crawler auto-starts
+  │     └── onDrain → startEnrichment()
+  │
+  ├── CrawlScheduler (auto-started by feedURLs, parallel to fanout)
+  │
+  └── Enrichment → final runClustering() → broadcast run:complete
+```
 
 ---
 

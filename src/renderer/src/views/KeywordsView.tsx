@@ -9,6 +9,13 @@ function SortIcon({ sortKey, col, sortDir }: { sortKey: string | null; col: stri
   return <span className="ml-1 text-blue-500">{sortDir === 'asc' ? '↑' : '↓'}</span>
 }
 
+const INTENT_COLORS: Record<string, string> = {
+  informational:  'bg-blue-50 text-blue-700',
+  commercial:     'bg-yellow-50 text-yellow-700',
+  transactional:  'bg-green-50 text-green-700',
+  navigational:   'bg-gray-100 text-gray-600'
+}
+
 const STATUS_COLORS: Record<string, string> = {
   pending: 'text-gray-400',
   queued: 'text-yellow-600',
@@ -107,6 +114,12 @@ export function KeywordsView(): JSX.Element {
       } else if (sortKey === 'aio') {
         valA = a.aioSourceCount
         valB = b.aioSourceCount
+      } else if (sortKey === 'volume') {
+        valA = a.searchVolume ?? -1
+        valB = b.searchVolume ?? -1
+      } else if (sortKey === 'intent') {
+        valA = a.searchIntent ?? ''
+        valB = b.searchIntent ?? ''
       } else {
         // domain column — lower position is better; missing = treat as 99
         valA = domainPositionMaps[sortKey]?.[a.id] ?? 99
@@ -300,6 +313,7 @@ export function KeywordsView(): JSX.Element {
           <span className="text-xs text-gray-400 tabular-nums">
             {filtered.length.toLocaleString()} keywords
           </span>
+
         </div>
 
         {/* Table */}
@@ -320,7 +334,9 @@ export function KeywordsView(): JSX.Element {
                     { key: 'keyword', label: 'Keyword',          align: 'left'  },
                     { key: 'status',  label: 'Status',           align: 'left'  },
                     { key: 'depth',   label: 'Depth',            align: 'left'  },
-                    { key: 'aio',     label: 'AIO Result Count', align: 'right' },
+                    { key: 'aio',     label: 'AIO Results',      align: 'right' },
+                    { key: 'volume',  label: 'Est. Monthly Volume', align: 'right' },
+                    { key: 'intent',  label: 'Intent',           align: 'left'  },
                   ] as const).map(({ key, label, align }) => (
                     <th
                       key={key}
@@ -380,6 +396,20 @@ export function KeywordsView(): JSX.Element {
                         <span className={kw.aioSourceCount > 0 ? 'text-blue-600 font-semibold' : 'text-gray-300'}>
                           {kw.aioSourceCount > 0 ? kw.aioSourceCount : '—'}
                         </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                        {kw.searchVolume != null
+                          ? <span className="text-gray-700">{kw.searchVolume.toLocaleString()}</span>
+                          : <span className="text-gray-200">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-1.5 text-xs">
+                        {kw.searchIntent
+                          ? <span className={`px-1.5 py-0.5 rounded text-xs capitalize ${INTENT_COLORS[kw.searchIntent] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {kw.searchIntent}
+                            </span>
+                          : <span className="text-gray-200">—</span>
+                        }
                       </td>
                       {selectedDomains.map((domain) => {
                         const pos = domainPositionMaps[domain]?.[kw.id]
