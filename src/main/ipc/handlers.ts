@@ -14,6 +14,7 @@ import {
   getKeywordRows,
   getKeywordsForDomain,
   getDomainPositions,
+  getOrganicPositions,
   getDomainSuggestions,
   getJobCounts,
   getAIOPositionReport,
@@ -40,6 +41,7 @@ import {
 import { runClustering } from '../topics/run'
 import { runEnrichment } from '../fanout/enrich'
 import { testGeminiKey, generateContentBrief } from '../gemini/client'
+import { firecrawlTestKey } from '../crawler/firecrawl-client'
 import { buildReportHTML, buildBriefHTML } from '../report/builder'
 import { crawlScheduler } from '../crawler/scheduler'
 import { mcpClient, DataForSEOClient } from '../mcp/client'
@@ -167,6 +169,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return getDomainPositions(domain)
   })
 
+  ipcMain.handle('keywords:getOrganicPositions', (_e, domain: string) => {
+    return getOrganicPositions(domain)
+  })
+
   ipcMain.handle('keywords:domainSuggestions', (_e, partial: string) => {
     return getDomainSuggestions(partial)
   })
@@ -292,6 +298,46 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return filePath
   })
 
+  ipcMain.handle('keywords:exportWithDomains', async (_e, domains: string[]) => {
+    const { filePath } = await dialog.showSaveDialog({
+      title: 'Export Keywords CSV',
+      defaultPath: `fanout-keywords-${Date.now()}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (!filePath) return null
+
+    const keywords = getKeywordRows(Number.MAX_SAFE_INTEGER, 0)  // no cap — export all
+    if (keywords.length === 0) return null
+
+    // Build domain position maps
+    const aioDomainMaps: Record<string, Record<number, number>> = {}
+    const organicDomainMaps: Record<string, Record<number, number>> = {}
+    for (const domain of domains) {
+      const aioRows = getDomainPositions(domain)
+      aioDomainMaps[domain] = Object.fromEntries(aioRows.map(r => [r.keywordId, r.position]))
+      const organicRows = getOrganicPositions(domain)
+      organicDomainMaps[domain] = Object.fromEntries(organicRows.map(r => [r.keywordId, r.position]))
+    }
+
+    // Build headers
+    const baseHeaders = ['id', 'keyword', 'status', 'search_volume', 'search_intent', 'depth']
+    const domainHeaders = domains.flatMap(d => [`aio_${d}`, `organic_${d}`])
+    const headers = [...baseHeaders, ...domainHeaders]
+
+    // Build rows
+    const rows = keywords.map(kw => {
+      const base = [kw.id, `"${kw.keyword.replace(/"/g, '""')}"`, kw.status, kw.searchVolume ?? '', kw.searchIntent ?? '', kw.depth]
+      const domainCols = domains.flatMap(d => [
+        aioDomainMaps[d]?.[kw.id] ?? '',
+        organicDomainMaps[d]?.[kw.id] ?? ''
+      ])
+      return [...base, ...domainCols].join(',')
+    })
+
+    writeFileSync(filePath, [headers.join(','), ...rows].join('\n'), 'utf-8')
+    return filePath
+  })
+
   ipcMain.handle('export:projectCopy', async () => {
     const { filePath } = await dialog.showSaveDialog({
       title: 'Save Project Copy',
@@ -351,6 +397,11 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('gemini:testKey', async (_e, apiKey: string) => {
     await testGeminiKey(apiKey)
+    return { ok: true }
+  })
+
+  ipcMain.handle('firecrawl:testKey', async (_e, apiKey: string) => {
+    await firecrawlTestKey(apiKey)
     return { ok: true }
   })
 

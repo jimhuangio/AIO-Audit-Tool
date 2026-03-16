@@ -46,6 +46,9 @@ const api = {
   geminiTestKey: (apiKey: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('gemini:testKey', apiKey),
 
+  firecrawlTestKey: (apiKey: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('firecrawl:testKey', apiKey),
+
   mcpConnect: (): Promise<{ connected: boolean }> =>
     ipcRenderer.invoke('mcp:connect'),
 
@@ -68,6 +71,12 @@ const api = {
 
   getDomainPositions: (domain: string): Promise<{ keywordId: number; position: number }[]> =>
     ipcRenderer.invoke('keywords:getDomainPositions', domain),
+
+  getOrganicPositionsForDomain: (domain: string): Promise<{ keywordId: number; position: number }[]> =>
+    ipcRenderer.invoke('keywords:getOrganicPositions', domain),
+
+  exportKeywordsCSV: (domains: string[]): Promise<string | null> =>
+    ipcRenderer.invoke('keywords:exportWithDomains', domains),
 
   getDomainSuggestions: (partial: string): Promise<string[]> =>
     ipcRenderer.invoke('keywords:domainSuggestions', partial),
