@@ -3,7 +3,7 @@
 // Get your key: btoa('your@email.com:yourpassword')  OR copy from the DataForSEO dashboard.
 
 import { fetch } from 'undici'
-import { log } from '../logger'
+import { log, logError } from '../logger'
 
 const DFS_BASE = 'https://api.dataforseo.com'
 const TIMEOUT_MS = 30_000
@@ -125,10 +125,18 @@ export class DataForSEOClient {
     log('[intent] result raw (first 300 chars):', JSON.stringify(data?.tasks?.[0]?.result).slice(0, 300))
     // The search_intent endpoint nests results: tasks[0].result[0].items[]
     const items: any[] = data?.tasks?.[0]?.result?.[0]?.items ?? data?.tasks?.[0]?.result ?? []
+    // Check task-level status — top-level 20000 doesn't mean the task succeeded
+    const taskStatus = data?.tasks?.[0]?.status_code
+    if (taskStatus && taskStatus !== 20000) {
+      logError?.('[intent] task-level error', `${taskStatus}: ${data?.tasks?.[0]?.status_message}`)
+    }
     log('[intent] items count:', items.length)
     if (items.length > 0) log('[intent] first item keys:', Object.keys(items[0]))
     for (const item of items) {
-      if (item.keyword) result[item.keyword] = item.keyword_intent?.label ?? null
+      if (!item.keyword) continue
+      // keyword_intent can be a plain string ("informational") or an object ({ label, probability })
+      const ki = item.keyword_intent
+      result[item.keyword] = typeof ki === 'string' ? ki : (ki?.label ?? null)
     }
     return result
   }

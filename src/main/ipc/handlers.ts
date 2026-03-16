@@ -1,6 +1,6 @@
 import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
-import { writeFileSync, mkdtempSync } from 'fs'
+import { writeFileSync, mkdtempSync, existsSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import {
   openProject,
@@ -36,6 +36,7 @@ import {
   getTopicAIOSnippets,
 } from '../db'
 import { runClustering } from '../topics/run'
+import { runEnrichment } from '../fanout/enrich'
 import { testGeminiKey, generateContentBrief } from '../gemini/client'
 import { buildReportHTML, buildBriefHTML } from '../report/builder'
 import { crawlScheduler } from '../crawler/scheduler'
@@ -43,6 +44,21 @@ import { mcpClient, DataForSEOClient } from '../mcp/client'
 import { scheduler } from '../fanout/scheduler'
 import { readAllCredentials, saveServiceCredentials, removeServiceCredentials } from '../credentials'
 import type { RunConfig } from '../../types'
+
+// Resolves an export file path: uses project exportDir if set and writable,
+// otherwise falls back to a temp directory.
+function resolveExportPath(filename: string, tmpPrefix: string): string {
+  try {
+    const { exportDir } = getProjectMeta()
+    if (exportDir) {
+      if (!existsSync(exportDir)) mkdirSync(exportDir, { recursive: true })
+      return join(exportDir, filename)
+    }
+  } catch {
+    // project not open or exportDir not set — fall through to temp
+  }
+  return join(mkdtempSync(join(tmpdir(), tmpPrefix)), filename)
+}
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   // ─── Project ───────────────────────────────────────────────────────────────
@@ -344,6 +360,38 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     updateTopicLabel(topicId, label)
   })
 
+  // ─── Re-enrich on demand ──────────────────────────────────────────────────
+
+  ipcMain.handle('run:enrich', async (_e, win?: BrowserWindow) => {
+    const window = getWindow()
+    let done = 0
+    await runEnrichment(
+      () => false,
+      (d, total) => {
+        done = d
+        if (window && !window.isDestroyed()) {
+          window.webContents.send('enrich:progress', { done: d, total })
+        }
+      }
+    )
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('run:complete')
+    }
+    return { done }
+  })
+
+  // ─── Export folder picker ─────────────────────────────────────────────────
+
+  ipcMain.handle('project:selectExportDir', async () => {
+    const win = getWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Select Export Folder',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
   // ─── Content Brief ────────────────────────────────────────────────────────
 
   ipcMain.handle('topics:generateBrief', async (_e, topicId: number) => {
@@ -359,10 +407,11 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const snippets  = getTopicAIOSnippets(topicId)
     const brief = await generateContentBrief(topic.label, keywords, snippets, topic.topDomain ?? null, apiKey)
 
-    // Write to a temp HTML file and open in the default browser
     const html = buildBriefHTML(topic.label, brief)
-    const tmpDir = mkdtempSync(join(tmpdir(), 'fanout-brief-'))
-    const filePath = join(tmpDir, `${topic.label.replace(/[^a-z0-9]/gi, '_')}_Content_Brief.html`)
+    const filePath = resolveExportPath(
+      `${topic.label.replace(/[^a-z0-9]/gi, '_')}_Content_Brief.html`,
+      'fanout-brief-'
+    )
     writeFileSync(filePath, html, 'utf8')
     await shell.openPath(filePath)
 
@@ -384,9 +433,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
 
-    // Write to a temp file and open in the default browser
-    const tmpDir = mkdtempSync(join(tmpdir(), 'fanout-report-'))
-    const filePath = join(tmpDir, `${meta.name.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`)
+    const filePath = resolveExportPath(
+      `${meta.name.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
+      'fanout-report-'
+    )
     writeFileSync(filePath, html, 'utf8')
     await shell.openPath(filePath)
     return { filePath }

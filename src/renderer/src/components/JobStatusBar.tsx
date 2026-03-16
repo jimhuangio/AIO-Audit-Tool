@@ -63,6 +63,19 @@ export function JobStatusBar(): JSX.Element {
     setRunStatus('idle')
   }
 
+  async function handleReenrich(): Promise<void> {
+    setRunError('')
+    setEnrichProgress({ done: 0, total: 1 })
+    try {
+      await window.api.runEnrichment()
+    } catch (err) {
+      setRunError(String(err).replace('Error: ', ''))
+    } finally {
+      setEnrichProgress(null)
+      queryClient.invalidateQueries({ queryKey: ['keywords'] })
+    }
+  }
+
   const enrichPct = enrichProgress
     ? Math.round((enrichProgress.done / enrichProgress.total) * 100)
     : 0
@@ -74,12 +87,22 @@ export function JobStatusBar(): JSX.Element {
         {/* Run controls */}
         <div className="flex items-center gap-2">
           {runStatus === 'idle' && (
-            <button
-              onClick={handleStart}
-              className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
-            >
-              ▶ Start Run
-            </button>
+            <>
+              <button
+                onClick={handleStart}
+                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+              >
+                ▶ Start Run
+              </button>
+              <button
+                onClick={handleReenrich}
+                disabled={enrichProgress !== null}
+                className="px-3 py-1 bg-white hover:bg-gray-100 disabled:opacity-40 text-gray-600 text-xs rounded border border-gray-300 transition-colors"
+                title="Re-fetch volume & intent for all unenriched keywords"
+              >
+                ↻ Re-enrich
+              </button>
+            </>
           )}
           {runStatus === 'running' && (
             <>

@@ -572,6 +572,39 @@ function ProjectSettingsSection({
         </Field>
       </Section>
 
+      <Section title="Export">
+        <Field label="Export Folder" hint="Where reports and briefs are saved. Leave blank to use system temp.">
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={form.exportDir ?? ''}
+              placeholder="System temp folder (default)"
+              className={`${inputCls} flex-1 text-gray-500 cursor-default`}
+            />
+            <button
+              type="button"
+              onClick={async () => {
+                const dir = await window.api.selectExportDir()
+                if (dir) setForm((f) => ({ ...f, exportDir: dir }))
+              }}
+              className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300 transition-colors whitespace-nowrap"
+            >
+              Browse…
+            </button>
+            {form.exportDir && (
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, exportDir: '' }))}
+                className="px-2 py-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors"
+                title="Clear"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </Field>
+      </Section>
+
       <Section title="Fan-Out Settings">
         <Field label="Max Depth" hint="1 = input keywords only, 2 = + their PAA/suggested searches">
           <input

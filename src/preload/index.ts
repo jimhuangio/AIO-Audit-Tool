@@ -186,6 +186,12 @@ const api = {
   generateTopicBrief: (topicId: number): Promise<{ brief: ContentBrief; filePath: string }> =>
     ipcRenderer.invoke('topics:generateBrief', topicId),
 
+  runEnrichment: (): Promise<{ done: number }> =>
+    ipcRenderer.invoke('run:enrich'),
+
+  selectExportDir: (): Promise<string | null> =>
+    ipcRenderer.invoke('project:selectExportDir'),
+
   onEnrichProgress: (callback: (data: { done: number; total: number }) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, data: { done: number; total: number }): void => callback(data)
     ipcRenderer.on('enrich:progress', handler)

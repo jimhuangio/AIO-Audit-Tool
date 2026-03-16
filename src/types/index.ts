@@ -12,6 +12,7 @@ export interface ProjectMeta {
   fanOutCap: number           // 0 = no cap (show all PAA results)
   childSource: 'none' | 'instead_of_paa' | 'with_paa'  // whether to use suggested searches for fan-out
   exclusionKeywords: string[] // lowercase phrases; candidates matching any are skipped
+  exportDir: string           // directory for HTML exports; empty = system temp
   dfsApiKey: string           // base64(login:password) — get from DataForSEO dashboard or btoa('email:pass')
   dfsLogin: string            // legacy; used to derive dfsApiKey if not set directly
   dfsPassword: string         // legacy

@@ -93,7 +93,8 @@ export function updateProjectSettings(settings: Partial<ProjectMeta>): void {
     fanOutDepth: 'fan_out_depth',
     fanOutCap: 'fan_out_cap',
     childSource: 'child_source',
-    exclusionKeywords: 'exclusion_keywords'
+    exclusionKeywords: 'exclusion_keywords',
+    exportDir: 'export_dir'
   }
 
   for (const [key, col] of Object.entries(colMap)) {
@@ -131,7 +132,8 @@ function rowToProjectMeta(row: any): ProjectMeta {
     fanOutDepth: row.fan_out_depth ?? 2,
     fanOutCap: row.fan_out_cap ?? 0,
     childSource: (row.child_source ?? 'none') as ProjectMeta['childSource'],
-    exclusionKeywords: JSON.parse(row.exclusion_keywords ?? '[]')
+    exclusionKeywords: JSON.parse(row.exclusion_keywords ?? '[]'),
+    exportDir: row.export_dir ?? ''
   }
 }
 
