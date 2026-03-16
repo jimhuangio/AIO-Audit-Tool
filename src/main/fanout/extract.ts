@@ -9,7 +9,7 @@ export interface ExtractedAIOSource {
   domainRoot: string
   domainFull: string
   aioSnippet: string | null
-  resultType: 'aio' | 'ai_mode'
+  resultType: 'aio'
 }
 
 export interface ExtractedPAAQuestion {
@@ -109,42 +109,16 @@ export function extractPAAQuestions(apiResponse: unknown): ExtractedPAAQuestion[
     })
 }
 
-// ─── AI Mode extraction ───────────────────────────────────────────────────────
+// ─── Suggested / Related Searches extraction ─────────────────────────────────
 
-export function extractAIModeFollowups(apiResponse: unknown): string[] {
+export function extractSuggestedSearches(apiResponse: unknown): string[] {
   const items = getItems(apiResponse)
-  const aiItem = items.find(
-    (i: any) => i?.type === 'ai_mode_overview' || i?.type === 'ai_overview'
-  )
-  if (!aiItem) return []
-
-  return (aiItem.follow_up_queries ?? aiItem.related_queries ?? []).filter(
-    (q: any) => typeof q === 'string'
-  )
-}
-
-export function extractAIModeSources(apiResponse: unknown): ExtractedAIOSource[] {
-  const items = getItems(apiResponse)
-  const aiItem = items.find(
-    (i: any) => i?.type === 'ai_mode_overview' || i?.type === 'ai_overview'
-  )
-  if (!aiItem) return []
-
-  const sources: any[] = aiItem.sources ?? aiItem.references ?? []
-  return sources
-    .filter((s: any) => s?.url)
-    .map((s: any, idx: number) => {
-      const domainFull = parseDomainFull(s.url)
-      return {
-        position: s.position ?? idx + 1,
-        url: s.url,
-        domainRoot: parseDomainRoot(domainFull),
-        domainFull,
-        aioSnippet: s.snippet ?? null,
-        resultType: 'ai_mode' as const
-      }
-    })
-    .filter((s) => s.position >= 1 && s.position <= 20)
+  const rsItem = items.find((i: any) => i?.type === 'related_searches')
+  if (!rsItem) return []
+  const rsItems: any[] = rsItem.items ?? []
+  return rsItems
+    .map((r: any) => r?.title ?? r?.query ?? r)
+    .filter((q: any) => typeof q === 'string' && q.length > 0)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -573,7 +573,7 @@ function ProjectSettingsSection({
       </Section>
 
       <Section title="Fan-Out Settings">
-        <Field label="Max Depth" hint="1 = input keywords only, 2 = + their PAA/follow-ups">
+        <Field label="Max Depth" hint="1 = input keywords only, 2 = + their PAA/suggested searches">
           <input
             type="number"
             min={1}
@@ -583,15 +583,27 @@ function ProjectSettingsSection({
             className={`${inputCls} w-24`}
           />
         </Field>
-        <Field label="Children Per Keyword" hint="Max PAA + AI Mode follow-ups added per keyword">
+        <Field label="Children Per Keyword" hint="Leave blank (0) to use all results — no cap">
           <input
             type="number"
-            min={1}
-            max={20}
-            value={form.fanOutCap ?? 5}
+            min={0}
+            max={50}
+            value={form.fanOutCap ?? 0}
             onChange={(e) => setForm((f) => ({ ...f, fanOutCap: Number(e.target.value) }))}
             className={`${inputCls} w-24`}
+            placeholder="0 = all"
           />
+        </Field>
+        <Field label="Suggested Searches" hint="Use Google's related searches as additional child keywords">
+          <select
+            value={form.childSource ?? 'none'}
+            onChange={(e) => setForm((f) => ({ ...f, childSource: e.target.value as ProjectMeta['childSource'] }))}
+            className={inputCls}
+          >
+            <option value="none">Not at all</option>
+            <option value="instead_of_paa">Instead of PAA</option>
+            <option value="with_paa">With PAA</option>
+          </select>
         </Field>
         <Field
           label="Exclusion Keywords"

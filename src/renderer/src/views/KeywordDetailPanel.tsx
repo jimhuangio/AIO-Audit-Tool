@@ -13,7 +13,6 @@ type Tab = 'aio' | 'paa' | 'children' | 'raw'
 
 export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>('aio')
-  const [rawType, setRawType] = useState<'aio' | 'ai_mode'>('aio')
 
   const aioQuery = useQuery({
     queryKey: ['keyword', keywordId, 'aio'],
@@ -34,8 +33,8 @@ export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.
   })
 
   const rawQuery = useQuery({
-    queryKey: ['keyword', keywordId, 'raw', rawType],
-    queryFn: () => window.api.getKeywordRawJson(keywordId, rawType),
+    queryKey: ['keyword', keywordId, 'raw'],
+    queryFn: () => window.api.getKeywordRawJson(keywordId, 'aio'),
     enabled: activeTab === 'raw'
   })
 
@@ -43,9 +42,7 @@ export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.
   const paaQuestions = paaQuery.data ?? []
   const children = childrenQuery.data ?? []
 
-  // Group AIO sources by result_type
   const aioOnly = aioSources.filter((s: any) => s.resultType === 'aio')
-  const aiModeOnly = aioSources.filter((s: any) => s.resultType === 'ai_mode')
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 w-[480px] shrink-0">
@@ -91,7 +88,7 @@ export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'aio' && (
-          <AIOTab aioOnly={aioOnly} aiModeOnly={aiModeOnly} loading={aioQuery.isLoading} />
+          <AIOTab aioOnly={aioOnly} loading={aioQuery.isLoading} />
         )}
         {activeTab === 'paa' && (
           <PAATab questions={paaQuestions} loading={paaQuery.isLoading} />
@@ -103,8 +100,6 @@ export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.
           <RawTab
             raw={rawQuery.data ?? null}
             loading={rawQuery.isLoading}
-            rawType={rawType}
-            setRawType={setRawType}
           />
         )}
       </div>
@@ -114,28 +109,12 @@ export function KeywordDetailPanel({ keywordId, keyword, onClose }: Props): JSX.
 
 // ─── AIO Tab ──────────────────────────────────────────────────────────────────
 
-function AIOTab({
-  aioOnly,
-  aiModeOnly,
-  loading
-}: {
-  aioOnly: any[]
-  aiModeOnly: any[]
-  loading: boolean
-}): JSX.Element {
+function AIOTab({ aioOnly, loading }: { aioOnly: any[]; loading: boolean }): JSX.Element {
   if (loading) return <Loading />
-  if (aioOnly.length === 0 && aiModeOnly.length === 0) {
-    return <Empty msg="No AIO sources found for this keyword." />
-  }
-
+  if (aioOnly.length === 0) return <Empty msg="No AIO sources found for this keyword." />
   return (
-    <div className="p-3 space-y-4">
-      {aioOnly.length > 0 && (
-        <SourceList title="AI Overview Sources" sources={aioOnly} />
-      )}
-      {aiModeOnly.length > 0 && (
-        <SourceList title="AI Mode Sources" sources={aiModeOnly} />
-      )}
+    <div className="p-3">
+      <SourceList title="AI Overview Sources" sources={aioOnly} />
     </div>
   )
 }
@@ -253,17 +232,7 @@ function ChildrenTab({ children, loading }: { children: any[]; loading: boolean 
 
 // ─── Raw JSON Tab ─────────────────────────────────────────────────────────────
 
-function RawTab({
-  raw,
-  loading,
-  rawType,
-  setRawType
-}: {
-  raw: string | null
-  loading: boolean
-  rawType: 'aio' | 'ai_mode'
-  setRawType: (t: 'aio' | 'ai_mode') => void
-}): JSX.Element {
+function RawTab({ raw, loading }: { raw: string | null; loading: boolean }): JSX.Element {
   const [copied, setCopied] = useState(false)
 
   function copy(): void {
@@ -273,7 +242,6 @@ function RawTab({
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Pretty-print JSON — memoized so large blobs don't re-parse on every render
   const pretty = useMemo(() => {
     if (!raw) return ''
     try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
@@ -281,37 +249,19 @@ function RawTab({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sub-tabs */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0">
-        {(['aio', 'ai_mode'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setRawType(t)}
-            className={`px-3 py-1 text-xs rounded transition-colors ${
-              rawType === t
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-            }`}
-          >
-            {t === 'aio' ? 'AIO (SERP Advanced)' : 'AI Mode'}
-          </button>
-        ))}
-        {raw && (
+      {raw && (
+        <div className="flex items-center px-3 py-2 border-b border-gray-200 shrink-0">
           <button
             onClick={copy}
             className="ml-auto px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 rounded border border-gray-200 transition-colors"
           >
             {copied ? '✓ Copied' : 'Copy'}
           </button>
-        )}
-      </div>
-
-      {/* Content */}
+        </div>
+      )}
       <div className="flex-1 overflow-auto p-3">
         {loading && <Loading />}
-        {!loading && !raw && (
-          <Empty msg={`No ${rawType === 'aio' ? 'SERP' : 'AI Mode'} data stored for this keyword.`} />
-        )}
+        {!loading && !raw && <Empty msg="No SERP data stored for this keyword." />}
         {!loading && raw && (
           <pre className="text-xs text-gray-700 font-mono leading-relaxed whitespace-pre-wrap break-all">
             {pretty}

@@ -92,6 +92,7 @@ export function updateProjectSettings(settings: Partial<ProjectMeta>): void {
     device: 'device',
     fanOutDepth: 'fan_out_depth',
     fanOutCap: 'fan_out_cap',
+    childSource: 'child_source',
     exclusionKeywords: 'exclusion_keywords'
   }
 
@@ -128,7 +129,8 @@ function rowToProjectMeta(row: any): ProjectMeta {
     languageCode: row.language_code ?? 'en',
     device: row.device ?? 'desktop',
     fanOutDepth: row.fan_out_depth ?? 2,
-    fanOutCap: row.fan_out_cap ?? 5,
+    fanOutCap: row.fan_out_cap ?? 0,
+    childSource: (row.child_source ?? 'none') as ProjectMeta['childSource'],
     exclusionKeywords: JSON.parse(row.exclusion_keywords ?? '[]')
   }
 }

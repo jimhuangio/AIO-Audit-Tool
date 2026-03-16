@@ -41,7 +41,8 @@ import {
 } from '../db'
 import {
   extractAIOSources,
-  extractPAAQuestions
+  extractPAAQuestions,
+  extractSuggestedSearches
 } from './extract'
 
 export interface WorkerCallbacks {
@@ -89,20 +90,31 @@ export async function processKeyword(
       insertPAAQuestions(keywordId, kw.depth, paaQuestions)
     }
 
-    // Fan-out: create children from PAA questions if below max depth
-    if (kw.depth < meta.fanOutDepth && paaQuestions.length > 0) {
-      const children = paaQuestions
-        .slice(0, meta.fanOutCap)
-        .map((q) => ({ keyword: q.question, source: 'paa' }))
+    // Fan-out: create children from PAA and/or suggested searches if below max depth
+    if (kw.depth < meta.fanOutDepth) {
+      const { childSource, fanOutCap } = meta
+      const usePAA       = childSource !== 'instead_of_paa'
+      const useSuggested = childSource === 'instead_of_paa' || childSource === 'with_paa'
 
-      const newChildIds = insertChildKeywords(
-        children,
-        keywordId,
-        kw.depth,
-        meta.exclusionKeywords
-      )
-      if (newChildIds.length > 0) {
-        callbacks.onChildrenAdded(newChildIds)
+      const candidates: { keyword: string; source: string }[] = []
+
+      if (usePAA && paaQuestions.length > 0) {
+        candidates.push(...paaQuestions.map((q) => ({ keyword: q.question, source: 'paa' })))
+      }
+
+      if (useSuggested) {
+        const suggested = extractSuggestedSearches(serpData)
+        candidates.push(...suggested.map((q) => ({ keyword: q, source: 'suggested' })))
+      }
+
+      // fanOutCap === 0 means no cap (all results)
+      const capped = fanOutCap > 0 ? candidates.slice(0, fanOutCap) : candidates
+
+      if (capped.length > 0) {
+        const newChildIds = insertChildKeywords(capped, keywordId, kw.depth, meta.exclusionKeywords)
+        if (newChildIds.length > 0) {
+          callbacks.onChildrenAdded(newChildIds)
+        }
       }
     }
 

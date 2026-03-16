@@ -9,7 +9,8 @@ export interface ProjectMeta {
   languageCode: string
   device: string
   fanOutDepth: number
-  fanOutCap: number
+  fanOutCap: number           // 0 = no cap (show all PAA results)
+  childSource: 'none' | 'instead_of_paa' | 'with_paa'  // whether to use suggested searches for fan-out
   exclusionKeywords: string[] // lowercase phrases; candidates matching any are skipped
   dfsApiKey: string           // base64(login:password) — get from DataForSEO dashboard or btoa('email:pass')
   dfsLogin: string            // legacy; used to derive dfsApiKey if not set directly
@@ -86,7 +87,7 @@ export interface AIOSourceRaw {
   domainRoot: string
   domainFull: string
   aioSnippet: string | null
-  resultType: 'aio' | 'ai_mode'
+  resultType: 'aio'
 }
 
 export interface CrawlStats {
