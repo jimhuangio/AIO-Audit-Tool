@@ -197,7 +197,7 @@ A single floating `<div>` rendered at the root of `TopicsView`, positioned via `
 **Menu items (topic row):**
 - Rename
 - Move to… → submenu listing all sub-categories (calls `categories:updateTopicCategory`)
-- Move to new sub-category… → calls `categories:createSub` then `categories:updateTopicCategory`, enters rename mode on the new sub-category
+- Move to new sub-category… → calls `categories:createSub` (using the topic's current parent `mainCategoryId` as the owner — the new sub-category lands in the same main category the topic currently belongs to) then `categories:updateTopicCategory`, enters rename mode on the new sub-category
 
 **Menu items (sub-category row):**
 - Rename
