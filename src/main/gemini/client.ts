@@ -1,7 +1,8 @@
-// Gemini API client — used for semantic keyword clustering.
+// Gemini API client — used for semantic keyword clustering and content brief generation.
 // Uses gemini-2.5-pro with JSON response schema for reliable structured output.
 import { fetch } from 'undici'
 import type { Cluster } from '../topics/cluster'
+import type { ContentBrief } from '../../types'
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const TIMEOUT_MS  = 120_000
@@ -118,4 +119,85 @@ async function clusterBatch(
 
     return { label: c.label, keywords: c.keywords, members }
   }).filter(c => c.members.length > 0)
+}
+
+// ─── Content Brief Generation ─────────────────────────────────────────────────
+
+export async function generateContentBrief(
+  topicLabel: string,
+  keywords: { keyword: string; searchVolume: number | null; searchIntent: string | null }[],
+  snippets: string[],
+  topDomain: string | null,
+  apiKey: string
+): Promise<ContentBrief> {
+  const kwList = keywords
+    .map(k => {
+      const vol = k.searchVolume != null ? ` (${k.searchVolume.toLocaleString()}/mo)` : ''
+      const intent = k.searchIntent ? ` [${k.searchIntent}]` : ''
+      return `- ${k.keyword}${vol}${intent}`
+    })
+    .join('\n')
+
+  const snippetList = snippets.slice(0, 10)
+    .map((s, i) => `${i + 1}. "${s}"`)
+    .join('\n')
+
+  const prompt =
+    `You are a senior SEO content strategist. Create a detailed content brief for the following topic cluster.\n\n` +
+    `Topic: ${topicLabel}\n\n` +
+    `Target keywords (with search volume and intent):\n${kwList}\n\n` +
+    (snippetList ? `Top-ranking AIO content snippets for context:\n${snippetList}\n\n` : '') +
+    (topDomain ? `Dominant AIO domain (main competitor to beat): ${topDomain}\n\n` : '') +
+    `Generate a complete content brief.`
+
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      h1:             { type: 'string' },
+      targetAudience: { type: 'string' },
+      contentType:    { type: 'string' },
+      wordCount:      { type: 'string' },
+      keyTopics:      { type: 'array', items: { type: 'string' } },
+      outline: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            heading:   { type: 'string' },
+            keyPoints: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['heading', 'keyPoints']
+        }
+      }
+    },
+    required: ['h1', 'targetAudience', 'contentType', 'wordCount', 'keyTopics', 'outline']
+  }
+
+  const res = await fetch(
+    `${GEMINI_BASE}/models/gemini-2.5-pro:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema,
+          temperature: 0.4
+        }
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    }
+  )
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Gemini HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+
+  const data = await res.json() as any
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Gemini returned empty response')
+
+  return JSON.parse(text) as ContentBrief
 }

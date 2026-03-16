@@ -151,6 +151,15 @@ export interface TopicRow {
   totalSearchVolume: number | null // sum of search_volume for all keywords in topic
 }
 
+export interface ContentBrief {
+  h1: string
+  targetAudience: string
+  contentType: string
+  wordCount: string
+  keyTopics: string[]
+  outline: { heading: string; keyPoints: string[] }[]
+}
+
 export interface TopicKeywordRow {
   id: number
   keyword: string

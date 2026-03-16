@@ -851,6 +851,18 @@ export function updateTopicLabel(topicId: number, label: string): void {
   getDB().prepare(`UPDATE topics SET label = ? WHERE id = ?`).run(label, topicId)
 }
 
+// Returns up to 20 non-null AIO snippets for keywords in a topic
+export function getTopicAIOSnippets(topicId: number): string[] {
+  const rows = getDB().prepare(
+    `SELECT DISTINCT a.aio_snippet
+     FROM aio_sources a
+     JOIN topic_keywords tk ON tk.keyword_id = a.keyword_id
+     WHERE tk.topic_id = ? AND a.aio_snippet IS NOT NULL AND a.aio_snippet != ''
+     LIMIT 20`
+  ).all(topicId) as { aio_snippet: string }[]
+  return rows.map(r => r.aio_snippet)
+}
+
 export function getSnippetMatchesForKeyword(keywordId: number): {
   url: string
   position: number

@@ -12,7 +12,8 @@ import type {
   CrawledPageRow,
   SnippetMatchRow,
   TopicRow,
-  TopicKeywordRow
+  TopicKeywordRow,
+  ContentBrief
 } from '../types'
 
 const api = {
@@ -181,6 +182,13 @@ const api = {
 
   updateTopicLabel: (topicId: number, label: string): Promise<void> =>
     ipcRenderer.invoke('topics:updateLabel', topicId, label),
+
+  generateTopicBrief: (topicId: number): Promise<ContentBrief> =>
+    ipcRenderer.invoke('topics:generateBrief', topicId),
+
+  // ─── Report ───────────────────────────────────────────────────────────────
+  generateReport: (): Promise<{ filePath: string }> =>
+    ipcRenderer.invoke('report:generate'),
 
   // ─── Global API Credentials ───────────────────────────────────────────────
   getAllCredentials: (): Promise<Record<string, Record<string, string>>> =>

@@ -96,6 +96,13 @@ export default function App(): JSX.Element {
           </div>
         )}
 
+        {/* Generate Report */}
+        {project && (
+          <div className="px-3 pb-2 border-t border-gray-200 pt-2">
+            <ReportButton />
+          </div>
+        )}
+
         {/* Project controls */}
         <div className="p-3 border-t border-gray-200 space-y-1">
           <button
@@ -140,6 +147,42 @@ export default function App(): JSX.Element {
           {activeView === 'topics' && <TopicsView />}
         </div>
       </div>
+    </div>
+  )
+}
+
+function ReportButton(): JSX.Element {
+  const [generating, setGenerating] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function handleGenerate(): Promise<void> {
+    setGenerating(true)
+    setMsg('')
+    try {
+      await window.api.generateReport()
+      setMsg('Opened!')
+      setTimeout(() => setMsg(''), 3000)
+    } catch (err) {
+      setMsg(String(err).replace('Error: ', '').slice(0, 60))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleGenerate}
+        disabled={generating}
+        className="w-full text-xs text-left px-2 py-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 disabled:opacity-40 rounded transition-colors font-medium"
+      >
+        {generating ? 'Generating…' : '↗ Generate Report'}
+      </button>
+      {msg && (
+        <div className={`text-xs px-2 mt-0.5 ${msg === 'Opened!' ? 'text-green-600' : 'text-red-500'} break-all`}>
+          {msg}
+        </div>
+      )}
     </div>
   )
 }

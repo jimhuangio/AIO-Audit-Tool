@@ -1,6 +1,7 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
-import { writeFileSync } from 'fs'
+import { writeFileSync, mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
 import {
   openProject,
   createProject,
@@ -32,9 +33,11 @@ import {
   getTopics,
   getTopicKeywords,
   updateTopicLabel,
+  getTopicAIOSnippets,
 } from '../db'
 import { runClustering } from '../topics/run'
-import { testGeminiKey } from '../gemini/client'
+import { testGeminiKey, generateContentBrief } from '../gemini/client'
+import { buildReportHTML } from '../report/builder'
 import { crawlScheduler } from '../crawler/scheduler'
 import { mcpClient, DataForSEOClient } from '../mcp/client'
 import { scheduler } from '../fanout/scheduler'
@@ -339,6 +342,45 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('topics:updateLabel', (_e, topicId: number, label: string) => {
     updateTopicLabel(topicId, label)
+  })
+
+  // ─── Content Brief ────────────────────────────────────────────────────────
+
+  ipcMain.handle('topics:generateBrief', async (_e, topicId: number) => {
+    const creds = readAllCredentials()
+    const apiKey = creds['gemini']?.apiKey ?? ''
+    if (!apiKey) throw new Error('Gemini API key not configured — add it in Setup → API Credentials')
+
+    const topics   = getTopics()
+    const topic    = topics.find(t => t.id === topicId)
+    if (!topic) throw new Error('Topic not found')
+
+    const keywords  = getTopicKeywords(topicId)
+    const snippets  = getTopicAIOSnippets(topicId)
+    return generateContentBrief(topic.label, keywords, snippets, topic.topDomain ?? null, apiKey)
+  })
+
+  // ─── Report ───────────────────────────────────────────────────────────────
+
+  ipcMain.handle('report:generate', async () => {
+    const meta   = getProjectMeta()
+    const stats  = getProjectStats()
+    const pivot  = getAIODomainPivot(false)
+    const topics = getTopics()
+
+    const topicData = topics.map(topic => ({
+      topic,
+      keywords: getTopicKeywords(topic.id)
+    }))
+
+    const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
+
+    // Write to a temp file and open in the default browser
+    const tmpDir = mkdtempSync(join(tmpdir(), 'fanout-report-'))
+    const filePath = join(tmpDir, `${meta.name.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`)
+    writeFileSync(filePath, html, 'utf8')
+    await shell.openPath(filePath)
+    return { filePath }
   })
 
   // ─── Global API Credentials ───────────────────────────────────────────────
