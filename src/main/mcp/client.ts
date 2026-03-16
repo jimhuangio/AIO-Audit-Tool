@@ -59,7 +59,7 @@ export class DataForSEOClient {
     languageCode: string
   ): Promise<Record<string, number | null>> {
     // Google Ads rejects: special chars, and keywords with more than 10 words
-    const sanitizeKw = (kw: string): string => kw.replace(/[?!+"]/g, '').replace(/\s+/g, ' ').trim()
+    const sanitizeKw = (kw: string): string => kw.replace(/[?!+"%]/g, '').replace(/\s+/g, ' ').trim()
     const sanitizedToOriginal: Record<string, string> = {}
     const sanitized = keywords
       .map((kw) => {
@@ -111,16 +111,42 @@ export class DataForSEOClient {
     return result
   }
 
+  // Local fallback intent classifier — used when the DataForSEO Labs endpoint is unavailable
+  classifyIntentPublic(keyword: string): string { return this.classifyIntent(keyword) }
+  private classifyIntent(keyword: string): string {
+    const kw = keyword.toLowerCase()
+    const transactional = /\b(buy|purchase|order|shop|deal|coupon|discount|cheap|price|cost|hire|download|get|sign up|subscribe|near me|delivery|shipping)\b/
+    const commercial = /\b(best|top|review|reviews|vs|versus|compare|comparison|alternative|alternatives|recommend|rating|rated|worth|pros and cons)\b/
+    const navigational = /\b(login|log in|sign in|website|official|homepage|account|portal|app)\b/
+    if (transactional.test(kw)) return 'transactional'
+    if (commercial.test(kw)) return 'commercial'
+    if (navigational.test(kw)) return 'navigational'
+    return 'informational'
+  }
+
   // Returns keyword → main intent label (null if not found)
   async fetchSearchIntent(
     keywords: string[],
     languageCode: string
   ): Promise<Record<string, string | null>> {
-    const data = await this.post('/v3/dataforseo_labs/google/search_intent/live', [
-      { keywords, language_code: languageCode }
-    ]) as any
+    const sanitizeKw = (kw: string): string => kw.replace(/[?!+"%]/g, '').replace(/\s+/g, ' ').trim()
+    const sanitizedToOriginal: Record<string, string> = {}
+    const sanitized = keywords
+      .map((kw) => {
+        const s = sanitizeKw(kw)
+        sanitizedToOriginal[s] = kw
+        return s
+      })
+      .filter((s) => s.length > 0 && s.split(' ').length <= 10)
+
     const result: Record<string, string | null> = {}
     for (const kw of keywords) result[kw] = null
+    if (sanitized.length === 0) return result
+
+    log('[intent] sending sanitized keywords sample:', sanitized.slice(0, 5))
+    const data = await this.post('/v3/dataforseo_labs/google/search_intent/live', [
+      { keywords: sanitized, language_code: languageCode }
+    ]) as any
     log('[intent] raw task status:', data?.tasks?.[0]?.status_code, data?.tasks?.[0]?.status_message)
     log('[intent] result raw (first 300 chars):', JSON.stringify(data?.tasks?.[0]?.result).slice(0, 300))
     // The search_intent endpoint nests results: tasks[0].result[0].items[]
@@ -136,7 +162,14 @@ export class DataForSEOClient {
       if (!item.keyword) continue
       // keyword_intent can be a plain string ("informational") or an object ({ label, probability })
       const ki = item.keyword_intent
-      result[item.keyword] = typeof ki === 'string' ? ki : (ki?.label ?? null)
+      const intent = typeof ki === 'string' ? ki : (ki?.label ?? null)
+      const original = sanitizedToOriginal[item.keyword] ?? item.keyword
+      result[original] = intent
+    }
+
+    // Fall back to local classifier for any keyword the API didn't return
+    for (const kw of keywords) {
+      if (result[kw] === null) result[kw] = this.classifyIntent(kw)
     }
     return result
   }
@@ -161,7 +194,10 @@ export class DataForSEOClient {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS)
     })
-    if (!res.ok) throw new Error(`DataForSEO HTTP ${res.status} on POST ${path}`)
+    if (!res.ok) {
+      const responseText = await res.text().catch(() => '')
+      throw new Error(`DataForSEO HTTP ${res.status} on POST ${path}: ${responseText.slice(0, 500)}`)
+    }
     const data = await res.json() as any
     if (data.status_code !== 20000) {
       throw new Error(`DataForSEO error ${data.status_code}: ${data.status_message}`)

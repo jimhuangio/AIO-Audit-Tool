@@ -113,8 +113,15 @@ export function extractPAAQuestions(apiResponse: unknown): ExtractedPAAQuestion[
 
 export function extractSuggestedSearches(apiResponse: unknown): string[] {
   const items = getItems(apiResponse)
-  const rsItem = items.find((i: any) => i?.type === 'related_searches')
+  const allTypes = items.map((i: any) => i?.type).filter(Boolean)
+  console.log('[extract] SERP item types:', allTypes)
+  const rsItem = items.find((i: any) =>
+    i?.type === 'related_searches' ||
+    i?.type === 'people_also_search' ||
+    i?.type === 'suggested_searches'
+  )
   if (!rsItem) return []
+  console.log('[extract] suggested searches item type:', rsItem.type, 'items:', rsItem.items?.length)
   const rsItems: any[] = rsItem.items ?? []
   return rsItems
     .map((r: any) => r?.title ?? r?.query ?? r)

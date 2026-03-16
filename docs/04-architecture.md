@@ -167,6 +167,16 @@ ALTER TABLE keywords ADD COLUMN category_id   INTEGER;
 ALTER TABLE keywords ADD COLUMN category_name TEXT;
 ```
 
+**Schema v8–v10 additions:**
+```sql
+-- v8: user-defined HTML export directory
+ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';
+-- v9: remap old fan_out_cap = 0 (was "unlimited") → 99
+UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;
+-- v10: JSON-LD structured data types per crawled page
+ALTER TABLE crawled_pages ADD COLUMN schema_types TEXT NOT NULL DEFAULT '[]';
+```
+
 ### Critical Indexes
 
 ```sql
@@ -303,11 +313,13 @@ SimpleQueue: enqueue each keyword
       │                                               runs in PARALLEL with fanout)
       ▼
 Enrichment (after all SERP work done)
-  Parallel API calls per keyword:
-  1. DataForSEO Google Ads: search_volume
-  2. DataForSEO Labs: search_intent (keyword_intent.label)
+  1. Gemini 2.0 Flash: classify all keywords by intent (batches of 200)
+     → local rule-based classifier if Gemini unavailable
+  Per-batch parallel API calls:
+  2. DataForSEO Google Ads: search_volume
   3. DataForSEO Labs: category_id + category_name
-  → upsertKeywordEnrichment() → keywords table
+  → upsertKeywordEnrichment() with COALESCE → keywords table
+  Retries up to 3× if keywords remain unenriched
 
       │  (every 10 completions during run, debounced 2s)
       ▼
@@ -521,21 +533,43 @@ Jaccard penalises hierarchical terms ("home loan" vs "home loan requirements" �
 
 ## Keyword Enrichment
 
-After the SERP harvest phase completes, every `done` keyword is enriched via three parallel DataForSEO API calls:
+After the SERP harvest phase completes, every `done` keyword is enriched. Volume and categories come from DataForSEO; intent comes from Gemini.
 
-| API | Endpoint | Field stored |
-|-----|----------|-------------|
-| Google Ads search volume | `/v3/keywords_data/google_ads/search_volume/live` | `search_volume` |
-| Labs search intent | `/v3/dataforseo_labs/google/search_intent/live` | `search_intent` (label: informational / navigational / commercial / transactional) |
-| Labs categories | `/v3/dataforseo_labs/google/categories_for_keywords/live` | `category_id`, `category_name` |
+| Source | API / Model | Field stored |
+|--------|-------------|-------------|
+| Google Ads search volume | DataForSEO `/v3/keywords_data/google_ads/search_volume/live` | `search_volume` |
+| Search intent | Gemini 2.0 Flash (`gemini-2.0-flash:generateContent`) | `search_intent` (informational / navigational / commercial / transactional) |
+| Google taxonomy category | DataForSEO `/v3/dataforseo_labs/google/categories_for_keywords/live` | `category_id`, `category_name` |
 
-**Volume API quirks:**
-- Google Ads rejects keywords containing `?`, `!`, `+`, or `"` → stripped before sending
-- Google Ads rejects keywords with >10 words → filtered out before sending
-- A sanitized→original reverse map restores results to the original keyword strings
+**Volume API sanitization:**
+- Strip `?`, `!`, `+`, `"`, `%` before sending (DataForSEO rejects entire batch on any invalid character)
+- Filter keywords with >10 words (Google Ads limit)
+- Sanitized→original reverse map restores results back to original keyword strings
 
-**Intent/categories response shape:**
-Both endpoints use two-level nesting — `tasks[0].result[0].items[]` (not `tasks[0].result[]`).
+**Intent via Gemini:**
+- `classifyIntentWithGemini()` batches up to 200 keywords per call with a JSON schema response
+- Uses `gemini-2.0-flash` (fast, cheap) at temperature 0
+- Falls back to a local rule-based classifier if Gemini key is absent or call fails
+- The DataForSEO Labs intent endpoint (`/v3/dataforseo_labs/google/search_intent/live`) was removed — it returned task-level 50000 errors and frequent timeouts regardless of keyword content
+
+**Retry logic:**
+- `runEnrichmentWithRetry()` calls `runEnrichment()` up to 3 times
+- After each pass, `getUnenrichedKeywords()` is checked — if any keywords still have null volume or intent, a retry is triggered
+- Prevents transient API failures from leaving keywords permanently unenriched
+
+**`getUnenrichedKeywords` condition:**
+```sql
+WHERE status IN ('done', 'error')
+  AND (search_volume IS NULL OR search_intent IS NULL)
+```
+`category_id` is excluded — categories API failures should not cause indefinite re-enrichment.
+
+**`upsertKeywordEnrichment` uses `COALESCE`:**
+```sql
+SET search_volume = COALESCE(?, search_volume),
+    search_intent = COALESCE(?, search_intent)
+```
+Null values from a failed API call never overwrite previously saved good data.
 
 ---
 

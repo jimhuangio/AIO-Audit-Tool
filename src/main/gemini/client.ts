@@ -121,6 +121,88 @@ async function clusterBatch(
   }).filter(c => c.members.length > 0)
 }
 
+// ─── Search Intent Classification ────────────────────────────────────────────
+
+const INTENT_BATCH_SIZE = 200
+
+export async function classifyIntentWithGemini(
+  keywords: string[],
+  apiKey: string
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {}
+  for (let i = 0; i < keywords.length; i += INTENT_BATCH_SIZE) {
+    const batch = keywords.slice(i, i + INTENT_BATCH_SIZE)
+    const batchResult = await classifyIntentBatch(batch, apiKey)
+    Object.assign(result, batchResult)
+  }
+  return result
+}
+
+async function classifyIntentBatch(
+  keywords: string[],
+  apiKey: string
+): Promise<Record<string, string>> {
+  const prompt =
+    `Classify each keyword by search intent. Use only these labels: informational, navigational, commercial, transactional.\n\n` +
+    `- informational: user wants to learn something\n` +
+    `- navigational: user wants a specific website or brand\n` +
+    `- commercial: user is researching before buying (best, reviews, compare)\n` +
+    `- transactional: user wants to buy, download, or take action\n\n` +
+    `Keywords:\n` +
+    keywords.map((k, i) => `${i + 1}. ${k}`).join('\n')
+
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      results: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            keyword: { type: 'string' },
+            intent:  { type: 'string', enum: ['informational', 'navigational', 'commercial', 'transactional'] }
+          },
+          required: ['keyword', 'intent']
+        }
+      }
+    },
+    required: ['results']
+  }
+
+  const res = await fetch(
+    `${GEMINI_BASE}/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema,
+          temperature: 0
+        }
+      }),
+      signal: AbortSignal.timeout(60_000)
+    }
+  )
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Gemini intent HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+
+  const data   = await res.json() as any
+  const text   = data?.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Gemini intent returned empty response')
+
+  const parsed = JSON.parse(text) as { results: { keyword: string; intent: string }[] }
+  const out: Record<string, string> = {}
+  for (const item of parsed.results ?? []) {
+    if (item.keyword && item.intent) out[item.keyword] = item.intent
+  }
+  return out
+}
+
 // ─── Content Brief Generation ─────────────────────────────────────────────────
 
 export async function generateContentBrief(

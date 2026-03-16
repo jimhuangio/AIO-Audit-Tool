@@ -55,9 +55,10 @@ Pulls three types of data per keyword via DataForSEO:
 
 ### 3. Fan-Out Discovery
 - User sets depth (1 = just input keywords, 2 = + their PAA/follow-ups, 3 = recursive)
-- Each keyword's PAA questions and AI Mode follow-ups become new keywords at depth+1
+- Child source: **PAA only** (default), **Related searches instead of PAA**, or **Related searches + PAA**
+- Each keyword's PAA questions and/or Google related searches become new keywords at depth+1
 - Global deduplication: a keyword discovered multiple times is fetched only once
-- Per-level child cap prevents runaway growth
+- Per-level child cap: `0` = no children, `1–98` = cap at N, `99` = unlimited
 
 ### 4. AIO Position Analysis (Killer Feature)
 Across all harvested keywords, for positions 1–10 in AIO source lists:
@@ -69,15 +70,18 @@ Across all harvested keywords, for positions 1–10 in AIO source lists:
 ### 5. URL Crawler + Snippet Matching
 - Crawls each cited URL once (cached)
 - Direct fetch first via `undici`; Firecrawl cloud JS-render fallback for JavaScript-heavy pages (YouTube, social platforms) and bot-blocked responses
-- Extracts: title, H1–H6, paragraphs, list items
+- Extracts: title, H1–H6, paragraphs, list items, and **JSON-LD structured data** (`@type` values from `<script type="application/ld+json">`)
 - Matches AIO snippet text → most likely source section using TF-IDF + Jaccard similarity
 - Answers: "Google cited paragraph 3 under H2 'How to Compare Cards'"
+- Crawler view shows schema types as colour-coded badges per URL (FAQPage, HowTo, Article, etc.)
 
 ### 6. Keyword Enrichment
 After the SERP harvest, every keyword is enriched with:
-- **Est. Monthly Volume** — Google Ads search volume via DataForSEO
-- **Search Intent** — informational / navigational / commercial / transactional (color-coded badge)
+- **Est. Monthly Volume** — Google Ads search volume via DataForSEO (keywords with special characters are sanitized before submission)
+- **Search Intent** — informational / navigational / commercial / transactional (color-coded badge); classified by Gemini 2.0 Flash if API key is configured, otherwise local rule-based classifier
 - **Google Taxonomy Category** — used to partition topic clustering for precision
+- Enrichment runs automatically after every fanout and retries up to 3× if any keywords remain unenriched
+- Re-enrich button in the status bar lets you backfill data on-demand without re-running the full fanout
 
 ### 7. Topic Clustering
 - Two backends: **Gemini 2.5 Pro** (semantic, preferred when API key configured) or local algorithm (overlap coefficient + domain Jaccard)
@@ -126,7 +130,7 @@ Two hours later they have:
 |------|--------|
 | DataForSEO account required | API key stored globally in `userData/api-credentials.json`; Clear button removes it |
 | Firecrawl (optional) | Cloud JS-render fallback for JS-heavy pages; API key stored in same credentials store |
-| Google Gemini (optional) | `gemini-2.5-pro` for semantic topic clustering; get a free key at aistudio.google.com; falls back to local algorithm if absent |
+| Google Gemini (optional) | `gemini-2.5-pro` for semantic topic clustering + content briefs; `gemini-2.0-flash` for search intent classification; get a free key at aistudio.google.com; falls back to local algorithm if absent |
 | API costs | ~$0.003 per SERP task; 5,000 keywords × 3 task types = ~$45; enrichment adds volume/intent/category calls |
 | Rate limits | DataForSEO: 2,000 tasks/min; app throttles to 500/min default |
 | OS | macOS + Windows (Electron cross-platform build); Linux possible |

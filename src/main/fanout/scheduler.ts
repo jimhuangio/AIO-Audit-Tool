@@ -6,6 +6,7 @@ import {
   getJobCounts,
   getProjectMeta,
   getClusterableKeywords,
+  getUnenrichedKeywords,
   clearTopics,
   insertTopics
 } from '../db'
@@ -144,16 +145,7 @@ export class FanoutScheduler {
   }
 
   private startEnrichment(): void {
-    console.log('[scheduler] starting enrichment')
-    runEnrichment(
-      () => !this.running,
-      (done, total) => {
-        if (this.window && !this.window.isDestroyed()) {
-          this.window.webContents.send('enrich:progress', { done, total })
-        }
-      }
-    )
-      .catch((err) => console.error('[scheduler] enrichment error:', err))
+    this.runEnrichmentWithRetry(1)
       .then(async () => {
         // Final topic cluster pass with all enriched data
         const inputs = getClusterableKeywords()
@@ -168,11 +160,29 @@ export class FanoutScheduler {
             .catch(err => console.error('[scheduler] final recluster error:', err))
         }
       })
+      .catch(err => console.error('[scheduler] enrichment error:', err))
       .finally(() => {
         this.broadcastProgress()
         this.broadcastComplete()
         this.stop()
       })
+  }
+
+  private async runEnrichmentWithRetry(attempt: number): Promise<void> {
+    const MAX_ATTEMPTS = 3
+    console.log(`[scheduler] starting enrichment (attempt ${attempt}/${MAX_ATTEMPTS})`)
+    await runEnrichment(
+      () => !this.running,
+      (done, total) => {
+        if (this.window && !this.window.isDestroyed()) {
+          this.window.webContents.send('enrich:progress', { done, total })
+        }
+      }
+    )
+    if (attempt < MAX_ATTEMPTS && getUnenrichedKeywords().length > 0) {
+      console.log(`[scheduler] unenriched keywords remain — retrying (attempt ${attempt + 1})`)
+      await this.runEnrichmentWithRetry(attempt + 1)
+    }
   }
 
   private broadcastComplete(): void {

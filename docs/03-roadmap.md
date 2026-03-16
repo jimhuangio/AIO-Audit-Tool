@@ -175,6 +175,32 @@ Timeline (weeks from kickoff)
 
 ---
 
+## Post-Phase 4 — Structured Data, Export, Intent & UX Fixes ✅
+
+**Goal:** Structured data as a crawl signal; user-defined export paths; robust enrichment; fan-out child source options.
+
+| Task | Owner | Status |
+|------|-------|--------|
+| JSON-LD structured data extraction (`@type` from `<script type="application/ld+json">`) | Dev | ✅ |
+| Schema type badges in Crawler view (colour-coded by type) | Dev | ✅ |
+| Per-topic schema type breakdown in HTML report | Dev | ✅ |
+| Per-topic HTML element breakdown (best-performing elements) in HTML report | Dev | ✅ |
+| Content brief: generate + export as HTML (auto-opens) | Dev | ✅ |
+| User-defined export folder in Settings (Browse button, persisted in DB) | Dev | ✅ |
+| `resolveExportPath()` helper: uses export dir or falls back to system temp | Dev | ✅ |
+| fanOutCap semantics: `0` = no children, `1–98` = cap at N, `99` = unlimited | Dev | ✅ |
+| DB migration 9: remap old `fan_out_cap = 0` (unlimited) → `99` | Dev | ✅ |
+| Fan-out child source: "Instead of PAA" (related searches only) now working | Dev | ✅ |
+| Search intent via Gemini 2.0 Flash (replaces broken DataForSEO Labs endpoint) | Dev | ✅ |
+| Local rule-based intent classifier as fallback when Gemini key absent | Dev | ✅ |
+| Volume API sanitizer: strip `%` in addition to `?!+"` (fixes 40501 batch rejection) | Dev | ✅ |
+| Enrichment retry: up to 3 passes if keywords remain unenriched after each pass | Dev | ✅ |
+| Re-enrich button in status bar (on-demand, without re-running fanout) | Dev | ✅ |
+| Enrichment progress bar in Keywords view (amber pulse while fetching) | Dev | ✅ |
+| DB schema v10: `export_dir` on project, `schema_types` JSON on crawled_pages | Dev | ✅ |
+
+---
+
 ## Phase 5 — Polish + Broader Platform (Week 14+)
 
 ### Desktop Polish
