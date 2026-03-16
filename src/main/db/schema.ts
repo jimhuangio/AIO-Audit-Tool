@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS project (
   language_code       TEXT NOT NULL DEFAULT 'en',
   device              TEXT NOT NULL DEFAULT 'desktop',
   fan_out_depth       INTEGER NOT NULL DEFAULT 2,
-  fan_out_cap         INTEGER NOT NULL DEFAULT 0,
+  fan_out_cap         INTEGER NOT NULL DEFAULT 99,
   child_source        TEXT NOT NULL DEFAULT 'none',
   exclusion_keywords  TEXT NOT NULL DEFAULT '[]',
   export_dir          TEXT NOT NULL DEFAULT ''
@@ -163,5 +163,7 @@ export const MIGRATIONS: Record<number, string> = {
     `ALTER TABLE keywords ADD COLUMN category_name TEXT;`
   ].join('\n'),
   7: `ALTER TABLE project ADD COLUMN child_source TEXT NOT NULL DEFAULT 'none';`,
-  8: `ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';`
+  8: `ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';`,
+  // Remap old fan_out_cap=0 (previously "unlimited") to 99 (new "unlimited")
+  9: `UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;`
 }

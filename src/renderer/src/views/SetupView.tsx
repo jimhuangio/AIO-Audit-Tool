@@ -616,15 +616,15 @@ function ProjectSettingsSection({
             className={`${inputCls} w-24`}
           />
         </Field>
-        <Field label="Children Per Keyword" hint="Leave blank (0) to use all results — no cap">
+        <Field label="Children Per Keyword" hint="0 = no children, 1–98 = cap at N, 99 = unlimited">
           <input
             type="number"
             min={0}
-            max={50}
-            value={form.fanOutCap ?? 0}
+            max={99}
+            value={form.fanOutCap ?? 99}
             onChange={(e) => setForm((f) => ({ ...f, fanOutCap: Number(e.target.value) }))}
             className={`${inputCls} w-24`}
-            placeholder="0 = all"
+            placeholder="99 = unlimited"
           />
         </Field>
         <Field label="Suggested Searches" hint="Use Google's related searches as additional child keywords">

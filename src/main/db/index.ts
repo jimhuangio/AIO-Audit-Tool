@@ -130,7 +130,7 @@ function rowToProjectMeta(row: any): ProjectMeta {
     languageCode: row.language_code ?? 'en',
     device: row.device ?? 'desktop',
     fanOutDepth: row.fan_out_depth ?? 2,
-    fanOutCap: row.fan_out_cap ?? 0,
+    fanOutCap: row.fan_out_cap ?? 99,
     childSource: (row.child_source ?? 'none') as ProjectMeta['childSource'],
     exclusionKeywords: JSON.parse(row.exclusion_keywords ?? '[]'),
     exportDir: row.export_dir ?? ''

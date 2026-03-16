@@ -107,8 +107,9 @@ export async function processKeyword(
         candidates.push(...suggested.map((q) => ({ keyword: q, source: 'suggested' })))
       }
 
-      // fanOutCap === 0 means no cap (all results)
-      const capped = fanOutCap > 0 ? candidates.slice(0, fanOutCap) : candidates
+      // fanOutCap: 0 = no children, 1–98 = cap at N, 99 = unlimited
+      if (fanOutCap === 0) return
+      const capped = fanOutCap >= 99 ? candidates : candidates.slice(0, fanOutCap)
 
       if (capped.length > 0) {
         const newChildIds = insertChildKeywords(capped, keywordId, kw.depth, meta.exclusionKeywords)

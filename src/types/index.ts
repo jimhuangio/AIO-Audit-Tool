@@ -9,7 +9,7 @@ export interface ProjectMeta {
   languageCode: string
   device: string
   fanOutDepth: number
-  fanOutCap: number           // 0 = no cap (show all PAA results)
+  fanOutCap: number           // 0 = no children, 1–98 = cap at N, 99 = unlimited
   childSource: 'none' | 'instead_of_paa' | 'with_paa'  // whether to use suggested searches for fan-out
   exclusionKeywords: string[] // lowercase phrases; candidates matching any are skipped
   exportDir: string           // directory for HTML exports; empty = system temp
