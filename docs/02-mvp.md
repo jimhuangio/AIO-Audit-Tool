@@ -85,7 +85,7 @@
 ### ✅ Phase 3 — Crawler + Snippet Matching (Complete)
 
 - [x] **URL crawler** — `undici` fetch, per-domain rate limiting (2.5s), 15s timeout, JS-SPA detection
-- [x] **Firecrawl fallback** — cloud JS-render API retried when direct fetch returns empty/JS-blocked pages; `JS_ONLY_DOMAINS` set (YouTube, Twitter/X, Instagram, etc.) always routes to Firecrawl; permanent failures (404/410/5xx) skip Firecrawl
+- [x] **Firecrawl fallback** — cloud JS-render API retried when direct fetch returns empty or JS-rendered content; permanent failures (404/410/5xx, non-HTML) skip Firecrawl; all URLs now go through direct fetch first
 - [x] **403 handling** — attempts HTML extraction regardless of status code; clears error if real content found
 - [x] **Section extraction** — `cheerio` parses h1–h6, p, li, blockquote; noise removal (nav/footer/ads); `extractPageContentFromMarkdown` for Firecrawl markdown output
 - [x] **Snippet matching** — TF-IDF weighted Jaccard + token overlap + bigram overlap + heading bonus
@@ -160,6 +160,22 @@
 - [x] **JSON pretty-print** — large SERP blobs no longer re-parsed on every render (`useMemo`)
 - [x] **Content source totals** — `totals` + `colMaxes` loops in `ContentSourcesTable` memoized on `rows`
 - [x] **Topic label draft** — `useEffect` syncs draft when `topic.label` changes externally after query refetch
+
+### ✅ Post-Phase 4 — Organic Rankings (Complete)
+
+- [x] **`organic_rankings` table** — schema v11 migration; stores `keyword_id`, `domain_root`, `domain_full`, `position` (from `rank_absolute`), `url`; indexed on `(keyword_id, domain_root)`
+- [x] **`extractOrganicResults()`** — parses `type: 'organic'` items from DataForSEO SERP response; uses `rank_absolute` for true SERP position (1–100); reuses `parseDomainFull`/`parseDomainRoot` helpers from `fanout/extract.ts`
+- [x] **Worker wiring** — `insertOrganicRankings()` called after `insertAIOSources()` in `worker.ts` for every processed keyword; forward-only (no backfill of historical `serp_results.raw_json`)
+- [x] **`getOrganicPositions(domain)`** — SQL query with partial `LIKE` match (consistent with `getDomainPositions`); returns `MIN(position)` per keyword grouped by `keyword_id`
+- [x] **`clearProjectData` update** — `DELETE FROM organic_rankings` runs first (FK-safe ordering before `keywords` delete)
+- [x] **IPC handler `keywords:getOrganicPositions`** — exposes organic positions to renderer
+- [x] **IPC handler `keywords:exportWithDomains`** — keywords CSV with `aio_<domain>` + `organic_<domain>` paired columns for all selected domains
+- [x] **Preload entries** — `getOrganicPositionsForDomain` and `exportKeywordsCSV` added to `window.api`
+- [x] **Domain chip `#` toggle** — `organicDomains` state in KeywordsView; `#` button on each chip highlights green when active; `removeDomain` also removes from `organicDomains`
+- [x] **Organic position columns** — green `bg-green-600` badge per keyword; appears immediately after paired AIO column; sortable via `organic_<domain>` sort key; blank (not `—`) when no organic data
+- [x] **Export button** — "Export CSV" in Keywords toolbar; exports all `selectedDomains` (both AIO + organic) regardless of which organic toggles are on
+
+---
 
 ### 🔲 Phase 5 — Polish
 

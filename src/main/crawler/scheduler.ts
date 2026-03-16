@@ -20,20 +20,7 @@ const DOMAIN_DELAY_MS      = 2500   // min ms between requests to the same domai
 const REQUEST_TIMEOUT_MS   = 15_000
 const USER_AGENT           = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 
-// Domains that are always JS-rendered and will never yield content via direct fetch
-const JS_ONLY_DOMAINS = new Set([
-  'youtube.com', 'www.youtube.com',
-  'twitter.com', 'x.com',
-  'instagram.com', 'www.instagram.com',
-  'facebook.com', 'www.facebook.com',
-  'linkedin.com', 'www.linkedin.com',
-  'tiktok.com', 'www.tiktok.com',
-])
 
-interface CrawlTask {
-  url: string
-  domain: string
-}
 
 export class CrawlScheduler {
   // Per-domain queues: round-robin dispatch with per-domain rate limiting
@@ -207,57 +194,49 @@ export class CrawlScheduler {
     let schemaTypes: string[] = []
     let isLikelyEmpty = false
 
-    let urlDomain = ''
-    try { urlDomain = new URL(url).hostname } catch { /* ignore */ }
-    const isJsOnly = JS_ONLY_DOMAINS.has(urlDomain)
+    // ── Step 1: Direct fetch ──────────────────────────────────────────────
+    const firecrawlKey = readAllCredentials()['firecrawl']?.apiKey ?? ''
+    let html = ''
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      })
+      statusCode = res.status
+      const ct = res.headers.get('content-type') ?? ''
 
-    // ── Step 1: Direct fetch (always, unless known JS-only domain) ────────
-    if (!isJsOnly) {
-      let html = ''
-      try {
-        const res = await fetch(url, {
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5'
-          },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-        })
-        statusCode = res.status
-        const ct = res.headers.get('content-type') ?? ''
-
-        if (ct.includes('text/html') || ct.includes('application/xhtml')) {
-          html = await res.text()
-        } else if (statusCode === 200) {
-          errorMsg = `non-html content-type: ${ct}`
-        } else {
-          errorMsg = `http ${statusCode}`
-        }
-      } catch (err) {
-        errorMsg = err instanceof Error ? err.message : String(err)
-        if (errorMsg.includes('TimeoutError') || errorMsg.includes('timeout')) {
-          errorMsg = 'timeout'
-        }
+      if (ct.includes('text/html') || ct.includes('application/xhtml')) {
+        html = await res.text()
+      } else if (statusCode === 200) {
+        errorMsg = `non-html content-type: ${ct}`
+      } else {
+        errorMsg = `http ${statusCode}`
       }
-
-      if (html) {
-        const extracted = extractPageContent(html)
-        title = extracted.title
-        metaDesc = extracted.metaDesc
-        sections = extracted.sections
-        schemaTypes = extracted.schemaTypes
-        isLikelyEmpty = extracted.isLikelyEmpty
-        if (isLikelyEmpty) errorMsg = errorMsg ?? 'js-rendered (empty content)'
-        else if (sections.length > 0 && errorMsg?.startsWith('http ')) errorMsg = null
+    } catch (err) {
+      errorMsg = err instanceof Error ? err.message : String(err)
+      if (errorMsg.includes('TimeoutError') || errorMsg.includes('timeout')) {
+        errorMsg = 'timeout'
       }
-    } else {
-      errorMsg = 'js-rendered (known JS-only domain)'
     }
 
-    // ── Step 2: Firecrawl retry — only when direct fetch had issues ───────
+    if (html) {
+      const extracted = extractPageContent(html)
+      title = extracted.title
+      metaDesc = extracted.metaDesc
+      sections = extracted.sections
+      schemaTypes = extracted.schemaTypes
+      isLikelyEmpty = extracted.isLikelyEmpty
+      if (isLikelyEmpty) errorMsg = errorMsg ?? 'js-rendered (empty content)'
+      else if (sections.length > 0 && errorMsg?.startsWith('http ')) errorMsg = null
+    }
+
+    // ── Step 2: Firecrawl fallback — only when direct fetch had issues ────
     // Skip for permanent failures (404, 410, 5xx, non-HTML) where Firecrawl won't help.
-    const firecrawlKey = readAllCredentials()['firecrawl']?.apiKey ?? ''
-    const directFailed = isJsOnly || isLikelyEmpty || (sections.length === 0)
+    const directFailed = isLikelyEmpty || (sections.length === 0)
     const permanentFailure = /^(http (404|410|[45]\d\d)|non-html content-type)/.test(errorMsg ?? '')
 
     if (firecrawlKey && directFailed && !permanentFailure) {

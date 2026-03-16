@@ -57,6 +57,12 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
   const [geminiTestMsg, setGeminiTestMsg] = useState('')
   const [geminiTesting, setGeminiTesting] = useState(false)
 
+  // Firecrawl API key
+  const [firecrawlApiKey, setFirecrawlApiKey] = useState('')
+  const [firecrawlSaveMsg, setFirecrawlSaveMsg] = useState('')
+  const [firecrawlTestMsg, setFirecrawlTestMsg] = useState('')
+  const [firecrawlTesting, setFirecrawlTesting] = useState(false)
+
   // Generic "other APIs" entries
   const [customEntries, setCustomEntries] = useState<{ service: string; key: string; value: string }[]>([])
   const [addingNew, setAddingNew] = useState(false)
@@ -74,9 +80,10 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
     setDfsApiKey(dfs.apiKey ?? '')
 
     setGeminiApiKey(store['gemini']?.apiKey ?? '')
+    setFirecrawlApiKey(store['firecrawl']?.apiKey ?? '')
 
     const entries = Object.entries(store)
-      .filter(([svc]) => svc !== 'dataforseo' && svc !== 'gemini')
+      .filter(([svc]) => svc !== 'dataforseo' && svc !== 'gemini' && svc !== 'firecrawl')
       .flatMap(([svc, fields]) =>
         Object.entries(fields).map(([key, value]) => ({ service: svc, key, value }))
       )
@@ -142,6 +149,35 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
   async function handleClearGemini(): Promise<void> {
     await window.api.removeCredentials('gemini')
     setGeminiApiKey('')
+    queryClient.invalidateQueries({ queryKey: ['credentials'] })
+  }
+
+  async function handleSaveFirecrawl(): Promise<void> {
+    await window.api.saveCredentials('firecrawl', { apiKey: firecrawlApiKey })
+    queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    setFirecrawlSaveMsg('Saved.')
+    setTimeout(() => setFirecrawlSaveMsg(''), 2000)
+  }
+
+  async function handleTestFirecrawl(): Promise<void> {
+    setFirecrawlTesting(true)
+    setFirecrawlTestMsg('')
+    try {
+      await window.api.firecrawlTestKey(firecrawlApiKey)
+      setFirecrawlTestMsg('✓ Connected')
+      setTimeout(() => setFirecrawlTestMsg(''), 3000)
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err)
+      const clean = raw.replace(/Error invoking remote method '[^']+': /, '').replace(/^Error: /, '')
+      setFirecrawlTestMsg(`✗ ${clean || raw}`)
+    } finally {
+      setFirecrawlTesting(false)
+    }
+  }
+
+  async function handleClearFirecrawl(): Promise<void> {
+    await window.api.removeCredentials('firecrawl')
+    setFirecrawlApiKey('')
     queryClient.invalidateQueries({ queryKey: ['credentials'] })
   }
 
@@ -276,6 +312,56 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
             {geminiTestMsg && (
               <span className={`text-xs ${geminiTestMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
                 {geminiTestMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Firecrawl */}
+      <div className="mb-5">
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Firecrawl
+        </div>
+        <div className="space-y-3 pl-1">
+          <Field
+            label="API Key"
+            hint="JS-render fallback for YouTube, social, and bot-blocked pages. Optional."
+          >
+            <input
+              type="password"
+              value={firecrawlApiKey}
+              onChange={(e) => setFirecrawlApiKey(e.target.value)}
+              className={inputCls}
+              placeholder="fc-..."
+            />
+          </Field>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleSaveFirecrawl}
+              disabled={!firecrawlApiKey}
+              className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleTestFirecrawl}
+              disabled={firecrawlTesting || !firecrawlApiKey}
+              className="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 text-gray-700 rounded transition-colors border border-gray-300"
+            >
+              {firecrawlTesting ? 'Testing…' : 'Test'}
+            </button>
+            <button
+              onClick={handleClearFirecrawl}
+              disabled={!firecrawlApiKey}
+              className="px-4 py-1.5 text-xs bg-white hover:bg-red-50 disabled:opacity-40 text-red-500 rounded transition-colors border border-red-200 hover:border-red-300"
+            >
+              Clear
+            </button>
+            {firecrawlSaveMsg && <span className="text-xs text-green-600">{firecrawlSaveMsg}</span>}
+            {firecrawlTestMsg && (
+              <span className={`text-xs ${firecrawlTestMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+                {firecrawlTestMsg}
               </span>
             )}
           </div>

@@ -201,6 +201,26 @@ Timeline (weeks from kickoff)
 
 ---
 
+## Post-Phase 4 — Organic Rankings ✅
+
+**Goal:** Surface organic SERP positions alongside AIO positions in the Keywords tab, with CSV export support.
+
+| Task | Owner | Status |
+|------|-------|--------|
+| `organic_rankings` table + schema v11 migration | Dev | ✅ |
+| `extractOrganicResults()` in `fanout/extract.ts` | Dev | ✅ |
+| `insertOrganicRankings()` wired into `worker.ts` | Dev | ✅ |
+| `getOrganicPositions(domain)` DB query | Dev | ✅ |
+| `clearProjectData` FK-safe deletion of `organic_rankings` | Dev | ✅ |
+| IPC handler `keywords:getOrganicPositions` | Dev | ✅ |
+| IPC handler `keywords:exportWithDomains` (AIO + organic CSV) | Dev | ✅ |
+| Preload entries: `getOrganicPositionsForDomain`, `exportKeywordsCSV` | Dev | ✅ |
+| Domain chip `#` toggle + `organicDomains` state | Dev | ✅ |
+| Green organic rank columns (sortable, interleaved with AIO columns) | Dev | ✅ |
+| Export CSV button in Keywords toolbar | Dev | ✅ |
+
+---
+
 ## Phase 5 — Polish + Broader Platform (Week 14+)
 
 ### Desktop Polish

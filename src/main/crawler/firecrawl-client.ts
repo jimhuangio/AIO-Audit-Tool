@@ -15,6 +15,15 @@ export interface FirecrawlResult {
   statusCode: number
 }
 
+export async function firecrawlTestKey(apiKey: string): Promise<void> {
+  const res = await fetch(`${FIRECRAWL_BASE}/v0/keyAuth`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(8_000)
+  })
+  if (res.status === 401 || res.status === 403) throw new Error('Invalid API key')
+  if (!res.ok) throw new Error(`Firecrawl HTTP ${res.status}`)
+}
+
 export async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlResult> {
   const res = await fetch(`${FIRECRAWL_BASE}/v1/scrape`, {
     method: 'POST',

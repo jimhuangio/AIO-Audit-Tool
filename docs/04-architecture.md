@@ -131,7 +131,8 @@ project (1)
         ├── serp_results     ← raw API JSON blobs
         ├── aio_sources      ← extracted pos 1-10 citations
         ├── paa_questions    ← extracted PAA items
-        └── fanout_edges     ← parent→child keyword graph
+        ├── fanout_edges     ← parent→child keyword graph
+        └── organic_rankings ← organic SERP positions (rank_absolute 1–100)
 
 crawled_pages (1)
   └── page_sections (N)     ← extracted h1-h6, p, li
@@ -155,11 +156,12 @@ See the full schema in `src/main/db/schema.ts`. Summary:
 | `aio_sources` | ≤10× keywords | position, url, domain_root, domain_full |
 | `paa_questions` | 0–8× keywords | question, ai_answer |
 | `fanout_edges` | varies | parent_keyword_id, child_keyword_id, source |
-| `crawled_pages` | ≤ unique URLs | url, status_code, title |
+| `crawled_pages` | ≤ unique URLs | url, status_code, title, schema_types |
 | `page_sections` | 50–500× pages | section_type, content, position_idx |
 | `snippet_matches` | ≤3× aio_sources | match_score, match_method |
 | `topics` | 5–50 | label, keywords JSON |
 | `topic_keywords` | = keywords | similarity score |
+| `organic_rankings` | ≤100× keywords | keyword_id, domain_root, domain_full, position (rank_absolute), url |
 
 **Schema v6 additions:**
 ```sql
@@ -167,7 +169,7 @@ ALTER TABLE keywords ADD COLUMN category_id   INTEGER;
 ALTER TABLE keywords ADD COLUMN category_name TEXT;
 ```
 
-**Schema v8–v10 additions:**
+**Schema v8–v11 additions:**
 ```sql
 -- v8: user-defined HTML export directory
 ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';
@@ -175,6 +177,16 @@ ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';
 UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;
 -- v10: JSON-LD structured data types per crawled page
 ALTER TABLE crawled_pages ADD COLUMN schema_types TEXT NOT NULL DEFAULT '[]';
+-- v11: organic SERP rankings per keyword (from DataForSEO type:'organic' items)
+CREATE TABLE IF NOT EXISTS organic_rankings (
+  id          INTEGER PRIMARY KEY,
+  keyword_id  INTEGER NOT NULL REFERENCES keywords(id),
+  domain_root TEXT    NOT NULL,
+  domain_full TEXT    NOT NULL,
+  position    INTEGER NOT NULL,  -- rank_absolute (1–100)
+  url         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_or_keyword_domain ON organic_rankings(keyword_id, domain_root);
 ```
 
 ### Critical Indexes
@@ -221,6 +233,7 @@ interface FanoutAPI {
   getKeywordRows(limit?: number, offset?: number): Promise<KeywordRow[]>
   getKeywordsForDomain(domain: string): Promise<KeywordRow[]>
   getDomainPositions(domain: string): Promise<{ keywordId: number; position: number }[]>
+  getOrganicPositionsForDomain(domain: string): Promise<{ keywordId: number; position: number }[]>
   getDomainSuggestions(partial: string): Promise<string[]>
   getJobCounts(): Promise<JobCounts>
   uploadKeywordsCSV(): Promise<{ inserted: number; total: number } | null>
@@ -270,6 +283,7 @@ interface FanoutAPI {
 
   // Export
   exportCSV(table: string, useSubdomain: boolean): Promise<string | null>
+  exportKeywordsCSV(domains: string[]): Promise<string | null>  // AIO + organic columns per domain
   exportProjectCopy(): Promise<string | null>
 
   // Global credentials
@@ -399,23 +413,22 @@ Electron Main Process
 **Credential:** `firecrawl.apiKey` in global credentials store
 
 **When Firecrawl is invoked:**
-1. URL's domain is in `JS_ONLY_DOMAINS` (YouTube, Twitter/X, Instagram, Facebook, LinkedIn, TikTok) → skip direct fetch entirely
-2. Direct fetch returned empty content or zero extracted sections
-3. Direct fetch returned a non-permanent error (not 404/410/4xx/5xx/non-HTML)
+1. Direct fetch returned empty content or zero extracted sections (including JS-rendered pages)
+2. Direct fetch returned a non-permanent error (not 404/410/4xx/5xx/non-HTML)
+
+Note: The previous `JS_ONLY_DOMAINS` fast-path (YouTube, Twitter/X, etc. skipping direct fetch entirely) was removed. All URLs now go through direct fetch first; Firecrawl is the universal fallback when the result is empty or non-permanent error.
 
 **Firecrawl is NOT invoked for permanent failures:** 404, 410, 5xx responses, or non-HTML content types — these are written as errors immediately.
 
 ```
 processURL(url)
   │
-  ├── Is JS-only domain? → skip to Firecrawl
-  │
-  ├── Direct fetch (undici)
+  ├── Direct fetch (undici) — always first, for all URLs
   │     ├── Extract sections (Cheerio)
   │     ├── Status ≥ 400 but has HTML content? → clear error, use sections
-  │     └── Return sections (may be empty)
+  │     └── Return sections (may be empty; isLikelyEmpty if JS-rendered)
   │
-  └── directFailed && !permanentFailure?
+  └── directFailed (empty/isLikelyEmpty) && !permanentFailure?
         └── Firecrawl REST POST /v1/scrape
               ├── Returns markdown → extractPageContentFromMarkdown()
               └── Upsert crawled_page + page_sections

@@ -69,7 +69,7 @@ Across all harvested keywords, for positions 1–10 in AIO source lists:
 
 ### 5. URL Crawler + Snippet Matching
 - Crawls each cited URL once (cached)
-- Direct fetch first via `undici`; Firecrawl cloud JS-render fallback for JavaScript-heavy pages (YouTube, social platforms) and bot-blocked responses
+- Direct fetch first via `undici` for all URLs; Firecrawl cloud JS-render fallback when content is empty or JS-rendered (YouTube, social platforms, bot-blocked pages)
 - Extracts: title, H1–H6, paragraphs, list items, and **JSON-LD structured data** (`@type` values from `<script type="application/ld+json">`)
 - Matches AIO snippet text → most likely source section using TF-IDF + Jaccard similarity
 - Answers: "Google cited paragraph 3 under H2 'How to Compare Cards'"

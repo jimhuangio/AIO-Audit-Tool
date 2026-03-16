@@ -23,15 +23,26 @@
 ## Quick Status (as of March 2026)
 
 ```
-Phase 1 (Foundation)    ████████████████████ 100%  ✅ Complete
-Phase 2 (Core MVP)      ████████████████████ 100%  ✅ Complete
-Phase 3 (Crawler)       ████████████████████ 100%  ✅ Complete
-Phase 4 (Clustering)    ████████████████████ 100%  ✅ Complete
-Post-P4 (UX/Analysis)   ████████████████████ 100%  ✅ Complete
-Phase 5 (Polish/iOS)    ░░░░░░░░░░░░░░░░░░░░   0%  🔲 Next
+Phase 1 (Foundation)        ████████████████████ 100%  ✅ Complete
+Phase 2 (Core MVP)          ████████████████████ 100%  ✅ Complete
+Phase 3 (Crawler)           ████████████████████ 100%  ✅ Complete
+Phase 4 (Clustering)        ████████████████████ 100%  ✅ Complete
+Post-P4 (UX/Analysis)       ████████████████████ 100%  ✅ Complete
+Post-P4 (Organic Rankings)  ████████████████████ 100%  ✅ Complete
+Phase 5 (Polish/iOS)        ░░░░░░░░░░░░░░░░░░░░   0%  🔲 Next
 ```
 
-**Recent additions (Post-Phase 4):**
+**Recent additions (Post-Phase 4 — Organic Rankings):**
+- `organic_rankings` table (schema v11 migration) — stores one row per organic SERP result per keyword
+- Organic results extracted from DataForSEO `type: 'organic'` items using `rank_absolute` position (1–100)
+- Domain chip `#` toggle in Keywords view — enables a green organic rank column beside the blue AIO column
+- `getOrganicPositions` DB query — same partial-`LIKE` matching as AIO domain positions
+- Keywords CSV export includes `aio_<domain>` + `organic_<domain>` columns for all selected domains
+- `clearProjectData` FK-safe deletion includes `organic_rankings` first
+
+**Earlier Post-Phase 4 additions:**
+- Firecrawl credentials section in Setup (dedicated Save/Test/Clear UI; `firecrawlTestKey()` added to client)
+- Crawler: removed `JS_ONLY_DOMAINS` fast-path — all URLs now try direct fetch first; Firecrawl is universal fallback
 - Firecrawl cloud JS-render fallback in crawler (YouTube, social platforms, bot-blocked pages)
 - Multi-domain comparison columns in Keywords view (N domains, parallel position queries)
 - Live domain autocomplete suggestions (Google-style)
@@ -70,6 +81,7 @@ Phase 5 (Polish/iOS)    ░░░░░░░░░░░░░░░░░░�
 9. **All keywords in Topics** — singletons produce solo topics; no minimum cluster size enforced
 10. **Query-per-run meta cache** — `getProjectMeta()` fetched once at run start, not per keyword
 11. **CTE + window functions in getTopics** — pre-aggregates domain stats once instead of 4 correlated subqueries per topic row
+12. **`organic_rankings` table (schema v11)** — one row per organic SERP result per keyword; `rank_absolute` as position; same domain-parsing helpers as `aio_sources`; CSV export always includes both AIO + organic columns
 
 ---
 
