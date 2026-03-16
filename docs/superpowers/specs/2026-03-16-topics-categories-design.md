@@ -36,10 +36,13 @@ ALTER TABLE topics ADD COLUMN sub_category_id INTEGER REFERENCES sub_categories(
 
 - `position` on both tables drives display order; updated in batch after every drag-and-drop.
 - Topics with `sub_category_id = NULL` are uncategorised — shown in a collapsible "Uncategorised" bucket at the bottom.
-- `clearProjectData()` and `clearTopics()` include FK-safe deletions:
+- Both `clearTopics()` and `clearProjectData()` in `db/index.ts` must be updated to include FK-safe teardown of the new tables **before** deleting from `topics`. Required order:
   1. `UPDATE topics SET sub_category_id = NULL`
   2. `DELETE FROM sub_categories`
   3. `DELETE FROM main_categories`
+  4. (then existing: `DELETE FROM topic_keywords; DELETE FROM topics` — or the full `clearProjectData` chain)
+
+  Without step 1, deleting from `sub_categories` will violate the `topics.sub_category_id` FK constraint (`PRAGMA foreign_keys=ON` is set on every project DB).
 
 ---
 
@@ -84,6 +87,8 @@ Every topic must appear exactly once.
 
 **Fallback:** If Gemini key is absent or call fails, all topics remain with `sub_category_id = NULL`. The Uncategorised bucket catches them. No crash, no partial state.
 
+**`topics:updated` event:** After `categorizeTopics()` completes and `clearAndInsertCategories()` commits, the main process must fire `window.webContents.send('topics:updated')`. This is placed in the `topics:run` IPC handler in `handlers.ts`, after `runClustering()` and `categorizeTopics()` both complete. This triggers the renderer's `onTopicsUpdated` listener, which invalidates both `['topics']` and `['categories', 'hierarchy']` queries.
+
 ### `clearAndInsertCategories(hierarchy)` in `db/index.ts`
 
 Runs in one transaction:
@@ -109,7 +114,7 @@ All new functions added to `src/main/db/index.ts`.
 | `renameSubCategory(id, label)` | Inline label edit |
 | `reorderCategories(updates: {id, level, position}[])` | Batch position update after drag completes |
 
-`getFullHierarchy()` returns everything the UI needs in one round trip, avoiding N+1 queries per category level.
+`getFullHierarchy()` returns a **flat joined result set** — one row per topic, with `main_category_id`, `main_category_label`, `main_category_position`, `sub_category_id`, `sub_category_label`, `sub_category_position`, and all existing `TopicRow` columns. Grouping into a nested structure is done in TypeScript before the data is returned over IPC. This matches the pattern used everywhere else in the codebase (e.g. `getTopics()` returns flat rows, the renderer groups them). Uncategorised topics have `sub_category_id = NULL` and `main_category_id = NULL` and are separated in TypeScript.
 
 ---
 
@@ -125,10 +130,12 @@ New channel prefix: `categories:*`. All handlers added to `src/main/ipc/handlers
 | `categories:renameMain` | `id, label` | Save inline edit |
 | `categories:renameSub` | `id, label` | Save inline edit |
 | `categories:reorder` | `{ id, level, position }[]` | Batch reorder after drag |
+| `categories:createMain` | `label: string` | Create new main category (from right-click menu) |
+| `categories:createSub` | `label: string, mainCategoryId: number` | Create new sub-category under a main category |
 | `report:generateForMain` | `mainCategoryId` | Scoped HTML report |
 | `report:generateForSub` | `subCategoryId` | Scoped HTML report |
 
-`report:generateForMain` and `report:generateForSub` reuse the existing `buildReportHTML()` builder with a filtered topic list (topics whose `sub_category_id` belongs to the requested category).
+`report:generateForMain` and `report:generateForSub` reuse the existing `buildReportHTML()` builder with a filtered topic list (topics whose `sub_category_id` belongs to the requested category). The `meta` and `stats` fields passed to `buildReportHTML()` are **project-wide** (unchanged from the full report) — only `topics[]` is filtered. The `pivot` (AIO domain visibility table) is also passed project-wide, giving category reports the same competitive landscape context as the full report.
 
 New preload entries added to `src/preload/index.ts` for each channel above.
 
@@ -189,13 +196,13 @@ A single floating `<div>` rendered at the root of `TopicsView`, positioned via `
 
 **Menu items (topic row):**
 - Rename
-- Move to… → submenu listing all sub-categories
-- Move to new sub-category… → creates sub-category, enters rename mode
+- Move to… → submenu listing all sub-categories (calls `categories:updateTopicCategory`)
+- Move to new sub-category… → calls `categories:createSub` then `categories:updateTopicCategory`, enters rename mode on the new sub-category
 
 **Menu items (sub-category row):**
 - Rename
-- Move to… → submenu listing all main categories
-- Move to new main category… → creates main category, enters rename mode
+- Move to… → submenu listing all main categories (calls `categories:moveSubCategory`)
+- Move to new main category… → calls `categories:createMain` then `categories:moveSubCategory`, enters rename mode on the new main category
 
 **Menu items (main category row):**
 - Rename
@@ -225,7 +232,7 @@ queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
 
 ## Out of Scope
 
-- Manually creating categories from scratch (Gemini always seeds the hierarchy; users reshape it)
+- Creating categories independent of any topic (all category creation is triggered from a topic or sub-category context menu action)
 - More than two levels of nesting
 - Per-category keyword filtering or search
 - Persisting collapse/expand state across sessions
