@@ -12,6 +12,7 @@ export interface ExtractedPage {
   title: string
   metaDesc: string
   sections: PageSection[]
+  schemaTypes: string[]   // unique @type values from JSON-LD blocks
   wordCount: number
   isLikelyEmpty: boolean  // true if JS-rendered SPA with no real content
 }
@@ -30,6 +31,9 @@ export function extractPageContent(html: string): ExtractedPage {
 
   const title = $('title').first().text().trim()
   const metaDesc = $('meta[name="description"]').attr('content')?.trim() ?? ''
+
+  // Extract structured data BEFORE removing noise (scripts are stripped by noise removal)
+  const schemaTypes = extractStructuredData($)
 
   // Remove noise before extracting
   $(NOISE_SELECTORS).remove()
@@ -55,7 +59,42 @@ export function extractPageContent(html: string): ExtractedPage {
   // Heuristic: if fewer than 50 words of content, probably a JS SPA
   const isLikelyEmpty = wordCount < 50 && sections.length < 3
 
-  return { title, metaDesc, sections, wordCount, isLikelyEmpty }
+  return { title, metaDesc, sections, schemaTypes, wordCount, isLikelyEmpty }
+}
+
+// Extract all unique @type values from JSON-LD <script> blocks.
+// Handles nested objects and @graph arrays.
+function extractStructuredData($: ReturnType<typeof cheerio.load>): string[] {
+  const types = new Set<string>()
+
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const raw = $(el).html() ?? ''
+      const json = JSON.parse(raw)
+      collectTypes(json, types)
+    } catch { /* ignore malformed JSON-LD */ }
+  })
+
+  return [...types]
+}
+
+function collectTypes(obj: unknown, out: Set<string>): void {
+  if (!obj || typeof obj !== 'object') return
+  if (Array.isArray(obj)) {
+    for (const item of obj) collectTypes(item, out)
+    return
+  }
+  const record = obj as Record<string, unknown>
+  const t = record['@type']
+  if (Array.isArray(t)) {
+    for (const s of t) if (typeof s === 'string') out.add(s)
+  } else if (typeof t === 'string') {
+    out.add(t)
+  }
+  // Recurse into values to catch @graph and nested entities
+  for (const val of Object.values(record)) {
+    if (val && typeof val === 'object') collectTypes(val, out)
+  }
 }
 
 // ─── Markdown → sections (used when Firecrawl returns pre-rendered content) ──
@@ -134,5 +173,6 @@ export function extractPageContentFromMarkdown(
   const wordCount = sections.reduce((n, s) => n + s.content.split(' ').length, 0)
   const isLikelyEmpty = wordCount < 50 && sections.length < 3
 
-  return { title, metaDesc, sections, wordCount, isLikelyEmpty }
+  // Markdown source has no JSON-LD available
+  return { title, metaDesc, sections, schemaTypes: [], wordCount, isLikelyEmpty }
 }

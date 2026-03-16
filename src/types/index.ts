@@ -108,6 +108,7 @@ export interface CrawledPageRow {
   errorMsg: string | null
   sectionCount: number
   matchCount: number
+  schemaTypes: string[]
 }
 
 export interface SnippetMatchRow {

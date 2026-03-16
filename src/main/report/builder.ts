@@ -6,7 +6,7 @@ export interface ReportData {
   meta: ProjectMeta
   stats: ProjectStats
   pivot: AIODomainPivotRow[]   // top domains × positions 1-10
-  topics: { topic: TopicRow; keywords: TopicKeywordRow[]; elements: { sectionType: string; count: number }[] }[]
+  topics: { topic: TopicRow; keywords: TopicKeywordRow[]; elements: { sectionType: string; count: number }[]; schemas: { schemaType: string; count: number }[] }[]
   generatedAt: number
 }
 
@@ -24,7 +24,7 @@ export function buildReportHTML(d: ReportData): string {
 
   const topDomains = d.pivot.slice(0, 25)
 
-  const topicSections = d.topics.map(({ topic, keywords, elements }) => {
+  const topicSections = d.topics.map(({ topic, keywords, elements, schemas }) => {
     const kwRows = keywords.map(kw => {
       const intentColor = kw.searchIntent ? (INTENT_COLORS[kw.searchIntent] ?? '#6b7280') : ''
       const intentBadge = kw.searchIntent
@@ -73,6 +73,29 @@ export function buildReportHTML(d: ReportData): string {
          </div>`
       : ''
 
+    // Schema type badges — colour-coded by how common they are in AIO-ranking pages
+    const schemaColors: Record<string, string> = {
+      FAQPage:       '#7c3aed', HowTo: '#7c3aed',
+      Article:       '#1d4ed8', NewsArticle: '#1d4ed8', BlogPosting: '#1d4ed8',
+      WebPage:       '#0369a1', WebSite: '#0369a1',
+      Organization:  '#0f766e', LocalBusiness: '#0f766e', Person: '#0f766e',
+      Product:       '#b45309', Offer: '#b45309', ItemList: '#b45309',
+      BreadcrumbList:'#6b7280', SiteLinksSearchBox: '#6b7280',
+    }
+    const schemaBadges = schemas.slice(0, 12).map(s => {
+      const color = schemaColors[s.schemaType] ?? '#374151'
+      return `<span style="display:inline-flex;align-items:center;gap:4px;background:${color}18;color:${color};border:1px solid ${color}44;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:500;white-space:nowrap">
+        ${escHtml(s.schemaType)}<span style="opacity:0.6">×${s.count}</span>
+      </span>`
+    }).join('')
+
+    const schemasSection = schemas.length > 0
+      ? `<div style="padding:10px 16px 12px;border-top:1px solid #f3f4f6">
+           <div style="font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Structured Data on Ranking Pages</div>
+           <div style="display:flex;flex-wrap:wrap;gap:6px">${schemaBadges}</div>
+         </div>`
+      : ''
+
     return `
     <div style="break-inside:avoid;margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
       <div style="background:#f9fafb;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
@@ -88,6 +111,7 @@ export function buildReportHTML(d: ReportData): string {
         </table>
       </div>
       ${elementsSection}
+      ${schemasSection}
     </div>`
   }).join('')
 

@@ -204,6 +204,7 @@ export class CrawlScheduler {
     let metaDesc = ''
     let errorMsg: string | null = null
     let sections: { sectionType: string; content: string; positionIdx: number }[] = []
+    let schemaTypes: string[] = []
     let isLikelyEmpty = false
 
     let urlDomain = ''
@@ -244,6 +245,7 @@ export class CrawlScheduler {
         title = extracted.title
         metaDesc = extracted.metaDesc
         sections = extracted.sections
+        schemaTypes = extracted.schemaTypes
         isLikelyEmpty = extracted.isLikelyEmpty
         if (isLikelyEmpty) errorMsg = errorMsg ?? 'js-rendered (empty content)'
         else if (sections.length > 0 && errorMsg?.startsWith('http ')) errorMsg = null
@@ -279,14 +281,14 @@ export class CrawlScheduler {
     if (sections.length > 0 && !isLikelyEmpty) {
       const pageId = insertCrawledPage({
         url, statusCode, title, metaDesc, errorMsg,
-        rawHtml: null
+        rawHtml: null, schemaTypes
       })
       if (pageId > 0) {
         insertPageSections(pageId, sections)
         await this.runSnippetMatching(url, pageId, sections)
       }
     } else {
-      insertCrawledPage({ url, statusCode, title, metaDesc, errorMsg, rawHtml: null })
+      insertCrawledPage({ url, statusCode, title, metaDesc, errorMsg, rawHtml: null, schemaTypes })
     }
 
     console.log(`[crawl] ${url} → ${statusCode}, ${sections.length} sections, err=${errorMsg ?? 'none'}`)

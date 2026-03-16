@@ -208,6 +208,7 @@ export function CrawlerView(): JSX.Element {
                 <th className="text-left px-4 py-2 text-gray-500 font-medium w-20">Sections</th>
                 <th className="text-left px-4 py-2 text-gray-500 font-medium w-20">Matches</th>
                 <th className="text-left px-4 py-2 text-gray-500 font-medium w-32">Title</th>
+                <th className="text-left px-4 py-2 text-gray-500 font-medium">Schema Types</th>
                 <th className="text-left px-4 py-2 text-gray-500 font-medium w-36">Error</th>
               </tr>
             </thead>
@@ -259,6 +260,18 @@ function PageRow({ page, index }: { page: CrawledPageRow; index: number }): JSX.
       </td>
       <td className="px-4 py-2 text-gray-500 truncate max-w-0" title={page.title ?? ''}>
         {page.title || <span className="text-gray-300">—</span>}
+      </td>
+      <td className="px-4 py-2">
+        {page.schemaTypes && page.schemaTypes.length > 0
+          ? <div className="flex flex-wrap gap-1">
+              {page.schemaTypes.map(t => (
+                <span key={t} className="px-1.5 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs font-mono whitespace-nowrap">
+                  {t}
+                </span>
+              ))}
+            </div>
+          : <span className="text-gray-300">—</span>
+        }
       </td>
       <td className="px-4 py-2 text-red-500 truncate max-w-0" title={page.errorMsg ?? ''}>
         {page.errorMsg || <span className="text-gray-300">—</span>}

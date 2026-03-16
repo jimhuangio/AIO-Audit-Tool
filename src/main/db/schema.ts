@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS crawled_pages (
   meta_desc    TEXT,
   raw_html     TEXT,
   crawled_at   INTEGER NOT NULL,
-  error_msg    TEXT
+  error_msg    TEXT,
+  schema_types TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS page_sections (
@@ -165,5 +166,6 @@ export const MIGRATIONS: Record<number, string> = {
   7: `ALTER TABLE project ADD COLUMN child_source TEXT NOT NULL DEFAULT 'none';`,
   8: `ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';`,
   // Remap old fan_out_cap=0 (previously "unlimited") to 99 (new "unlimited")
-  9: `UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;`
+  9: `UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;`,
+  10: `ALTER TABLE crawled_pages ADD COLUMN schema_types TEXT NOT NULL DEFAULT '[]';`
 }

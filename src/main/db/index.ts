@@ -583,6 +583,7 @@ export function insertCrawledPage(page: {
   metaDesc: string
   errorMsg: string | null
   rawHtml: string | null
+  schemaTypes?: string[]
 }): number {
   const db = getDB()
 
@@ -591,9 +592,13 @@ export function insertCrawledPage(page: {
   if (existing) return existing.id
 
   const info = db.prepare(`
-    INSERT INTO crawled_pages (url, status_code, title, meta_desc, raw_html, crawled_at, error_msg)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(page.url, page.statusCode, page.title, page.metaDesc, page.rawHtml, Date.now(), page.errorMsg)
+    INSERT INTO crawled_pages (url, status_code, title, meta_desc, raw_html, crawled_at, error_msg, schema_types)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    page.url, page.statusCode, page.title, page.metaDesc, page.rawHtml,
+    Date.now(), page.errorMsg,
+    JSON.stringify(page.schemaTypes ?? [])
+  )
 
   return Number(info.lastInsertRowid)
 }
@@ -675,7 +680,8 @@ export function getCrawledPageRows(limit = 500, offset = 0): CrawledPageRow[] {
         COUNT(DISTINCT s.id)  AS sectionCount,
         COUNT(DISTINCT sm.id) AS matchCount,
         p.crawled_at as crawledAt,
-        p.error_msg as errorMsg
+        p.error_msg as errorMsg,
+        p.schema_types as schemaTypesJson
       FROM crawled_pages p
       LEFT JOIN page_sections s  ON s.page_id = p.id
       LEFT JOIN snippet_matches sm ON sm.page_section_id = s.id
@@ -683,7 +689,11 @@ export function getCrawledPageRows(limit = 500, offset = 0): CrawledPageRow[] {
       ORDER BY p.crawled_at DESC
       LIMIT ? OFFSET ?`
     )
-    .all(limit, offset) as CrawledPageRow[]
+    .all(limit, offset)
+    .map((row: any) => ({
+      ...row,
+      schemaTypes: (() => { try { return JSON.parse(row.schemaTypesJson ?? '[]') } catch { return [] } })()
+    })) as CrawledPageRow[]
 }
 
 // ─── Topics ───────────────────────────────────────────────────────────────────
@@ -860,6 +870,31 @@ export function getTopicKeywords(topicId: number): TopicKeywordRow[] {
 
 export function updateTopicLabel(topicId: number, label: string): void {
   getDB().prepare(`UPDATE topics SET label = ? WHERE id = ?`).run(label, topicId)
+}
+
+// Returns schema @type → page count for all crawled AIO-source pages tied to a topic.
+export function getTopicSchemaCounts(topicId: number): { schemaType: string; count: number }[] {
+  const rows = getDB().prepare(
+    `SELECT DISTINCT cp.schema_types
+     FROM crawled_pages cp
+     JOIN aio_sources a   ON a.url          = cp.url
+     JOIN topic_keywords tk ON tk.keyword_id = a.keyword_id
+     WHERE tk.topic_id = ?
+       AND cp.schema_types IS NOT NULL
+       AND cp.schema_types != '[]'`
+  ).all(topicId) as { schema_types: string }[]
+
+  const counts: Record<string, number> = {}
+  for (const row of rows) {
+    try {
+      const types = JSON.parse(row.schema_types) as string[]
+      for (const t of types) counts[t] = (counts[t] ?? 0) + 1
+    } catch { /* ignore */ }
+  }
+
+  return Object.entries(counts)
+    .map(([schemaType, count]) => ({ schemaType, count }))
+    .sort((a, b) => b.count - a.count)
 }
 
 // Returns HTML element type → match count for all snippet matches tied to a topic's keywords.
