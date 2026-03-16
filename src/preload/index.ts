@@ -183,7 +183,7 @@ const api = {
   updateTopicLabel: (topicId: number, label: string): Promise<void> =>
     ipcRenderer.invoke('topics:updateLabel', topicId, label),
 
-  generateTopicBrief: (topicId: number): Promise<ContentBrief> =>
+  generateTopicBrief: (topicId: number): Promise<{ brief: ContentBrief; filePath: string }> =>
     ipcRenderer.invoke('topics:generateBrief', topicId),
 
   onEnrichProgress: (callback: (data: { done: number; total: number }) => void): (() => void) => {

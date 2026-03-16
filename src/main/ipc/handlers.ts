@@ -37,7 +37,7 @@ import {
 } from '../db'
 import { runClustering } from '../topics/run'
 import { testGeminiKey, generateContentBrief } from '../gemini/client'
-import { buildReportHTML } from '../report/builder'
+import { buildReportHTML, buildBriefHTML } from '../report/builder'
 import { crawlScheduler } from '../crawler/scheduler'
 import { mcpClient, DataForSEOClient } from '../mcp/client'
 import { scheduler } from '../fanout/scheduler'
@@ -357,7 +357,16 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     const keywords  = getTopicKeywords(topicId)
     const snippets  = getTopicAIOSnippets(topicId)
-    return generateContentBrief(topic.label, keywords, snippets, topic.topDomain ?? null, apiKey)
+    const brief = await generateContentBrief(topic.label, keywords, snippets, topic.topDomain ?? null, apiKey)
+
+    // Write to a temp HTML file and open in the default browser
+    const html = buildBriefHTML(topic.label, brief)
+    const tmpDir = mkdtempSync(join(tmpdir(), 'fanout-brief-'))
+    const filePath = join(tmpDir, `${topic.label.replace(/[^a-z0-9]/gi, '_')}_Content_Brief.html`)
+    writeFileSync(filePath, html, 'utf8')
+    await shell.openPath(filePath)
+
+    return { brief, filePath }
   })
 
   // ─── Report ───────────────────────────────────────────────────────────────

@@ -171,7 +171,7 @@ function TopicRow({
     setGeneratingBrief(true)
     setBriefError('')
     try {
-      const brief = await window.api.generateTopicBrief(topic.id)
+      const { brief } = await window.api.generateTopicBrief(topic.id)
       onBriefReady(brief)
     } catch (err) {
       setBriefError(String(err).replace('Error: ', '').slice(0, 80))
@@ -217,7 +217,7 @@ function TopicRow({
           className="mt-2 px-2 py-1 text-xs bg-gray-100 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40 text-gray-500 rounded border border-gray-200 hover:border-blue-200 transition-colors"
           title="Generate content brief with Gemini"
         >
-          {generatingBrief ? 'Generating…' : '✦ Generate Brief'}
+          {generatingBrief ? 'Generating…' : '✦ Export Brief'}
         </button>
         {briefError && (
           <div className="text-xs text-red-500 mt-1 break-all">{briefError}</div>

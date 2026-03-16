@@ -1,6 +1,6 @@
-// Generates a branded HTML report from project data.
+// Generates branded HTML output from project data or content briefs.
 // Opened in the user's default browser; can be printed to PDF from there.
-import type { ProjectMeta, ProjectStats, AIODomainPivotRow, TopicRow, TopicKeywordRow } from '../../types'
+import type { ProjectMeta, ProjectStats, AIODomainPivotRow, TopicRow, TopicKeywordRow, ContentBrief } from '../../types'
 
 export interface ReportData {
   meta: ProjectMeta
@@ -158,6 +158,89 @@ function statCard(label: string, value: string, color: string): string {
 
 function escHtml(s: string): string {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+export function buildBriefHTML(topicLabel: string, brief: ContentBrief): string {
+  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  const keyTopicsHTML = brief.keyTopics.length > 0
+    ? `<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px">
+        ${brief.keyTopics.map(t => `<li style="display:flex;gap:8px;font-size:13px;color:#374151"><span style="color:#3b82f6;margin-top:2px;flex-shrink:0">•</span>${escHtml(t)}</li>`).join('')}
+       </ul>`
+    : ''
+
+  const outlineHTML = brief.outline.map(section => `
+    <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;break-inside:avoid">
+      <div style="background:#f9fafb;padding:10px 16px;border-bottom:1px solid #e5e7eb">
+        <span style="font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px">H2</span>
+        <span style="font-size:14px;font-weight:600;color:#111">${escHtml(section.heading)}</span>
+      </div>
+      ${section.keyPoints.length > 0 ? `
+      <ul style="margin:0;padding:10px 16px;list-style:none;display:flex;flex-direction:column;gap:4px">
+        ${section.keyPoints.map(pt => `<li style="display:flex;gap:8px;font-size:12px;color:#4b5563"><span style="color:#d1d5db;flex-shrink:0">–</span>${escHtml(pt)}</li>`).join('')}
+      </ul>` : ''}
+    </div>`).join('')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Content Brief — ${escHtml(topicLabel)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;background:#fff;font-size:13px;line-height:1.5}
+  @media print{body{padding:0}.no-print{display:none}@page{margin:20mm}}
+</style>
+</head>
+<body style="max-width:800px;margin:0 auto;padding:40px 32px">
+
+  <!-- Header -->
+  <div style="margin-bottom:32px;padding-bottom:20px;border-bottom:2px solid #111">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#6b7280;margin-bottom:6px">Tombo Group · AIO Audit Tool · Content Brief</div>
+    <h1 style="font-size:24px;font-weight:700;color:#111;margin-bottom:4px">${escHtml(topicLabel)}</h1>
+    <div style="font-size:12px;color:#6b7280">Generated ${date}</div>
+  </div>
+
+  <!-- Recommended H1 -->
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin-bottom:24px">
+    <div style="font-size:10px;font-weight:600;color:#3b82f6;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">Recommended H1</div>
+    <div style="font-size:18px;font-weight:600;color:#111">${escHtml(brief.h1)}</div>
+  </div>
+
+  <!-- Meta cards -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px">
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">Target Audience</div>
+      <div style="font-size:13px;font-weight:500;color:#111">${escHtml(brief.targetAudience)}</div>
+    </div>
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">Content Type</div>
+      <div style="font-size:13px;font-weight:500;color:#111">${escHtml(brief.contentType)}</div>
+    </div>
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">Word Count</div>
+      <div style="font-size:13px;font-weight:500;color:#111">${escHtml(brief.wordCount)}</div>
+    </div>
+  </div>
+
+  <!-- Key Topics -->
+  ${keyTopicsHTML ? `
+  <h2 style="font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Key Topics to Cover</h2>
+  <div style="margin-bottom:28px">${keyTopicsHTML}</div>` : ''}
+
+  <!-- Outline -->
+  ${outlineHTML ? `
+  <h2 style="font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Content Outline</h2>
+  <div style="margin-bottom:40px">${outlineHTML}</div>` : ''}
+
+  <!-- Footer -->
+  <div style="margin-top:48px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center">
+    AIO Audit Tool by Tombo Group · tombogroup.com
+  </div>
+
+</body>
+</html>`
 }
 
 function locationLabel(code: number): string {
