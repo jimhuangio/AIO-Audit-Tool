@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 11
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -140,6 +140,18 @@ CREATE TABLE IF NOT EXISTS topic_keywords (
   similarity REAL,
   PRIMARY KEY(topic_id, keyword_id)
 );
+
+CREATE TABLE IF NOT EXISTS organic_rankings (
+  id          INTEGER PRIMARY KEY,
+  keyword_id  INTEGER NOT NULL REFERENCES keywords(id),
+  domain_root TEXT    NOT NULL,
+  domain_full TEXT    NOT NULL,
+  position    INTEGER NOT NULL,
+  url         TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_or_keyword_domain
+  ON organic_rankings(keyword_id, domain_root);
 `
 
 export const MIGRATIONS: Record<number, string> = {
@@ -167,5 +179,17 @@ export const MIGRATIONS: Record<number, string> = {
   8: `ALTER TABLE project ADD COLUMN export_dir TEXT NOT NULL DEFAULT '';`,
   // Remap old fan_out_cap=0 (previously "unlimited") to 99 (new "unlimited")
   9: `UPDATE project SET fan_out_cap = 99 WHERE fan_out_cap = 0;`,
-  10: `ALTER TABLE crawled_pages ADD COLUMN schema_types TEXT NOT NULL DEFAULT '[]';`
+  10: `ALTER TABLE crawled_pages ADD COLUMN schema_types TEXT NOT NULL DEFAULT '[]';`,
+  11: [
+    `CREATE TABLE IF NOT EXISTS organic_rankings (
+      id          INTEGER PRIMARY KEY,
+      keyword_id  INTEGER NOT NULL REFERENCES keywords(id),
+      domain_root TEXT    NOT NULL,
+      domain_full TEXT    NOT NULL,
+      position    INTEGER NOT NULL,
+      url         TEXT    NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_or_keyword_domain
+       ON organic_rankings(keyword_id, domain_root)`
+  ].join(';\n')
 }
