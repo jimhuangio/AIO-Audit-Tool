@@ -243,6 +243,20 @@ export function getDomainPositions(domain: string): { keywordId: number; positio
     .all(like, like) as { keywordId: number; position: number }[]
 }
 
+// Returns the organic position per keyword for a given domain (partial match).
+// Used to build per-domain organic rank columns in the keyword table.
+export function getOrganicPositions(domain: string): { keywordId: number; position: number }[] {
+  const like = `%${domain}%`
+  return getDB()
+    .prepare(
+      `SELECT keyword_id as keywordId, MIN(position) as position
+       FROM organic_rankings
+       WHERE domain_root LIKE ? OR domain_full LIKE ?
+       GROUP BY keyword_id`
+    )
+    .all(like, like) as { keywordId: number; position: number }[]
+}
+
 // Returns distinct domain_root values that partially match the given string.
 // Used for the keyword domain-filter autocomplete.
 export function getDomainSuggestions(partial: string): string[] {
@@ -303,6 +317,24 @@ export function insertAIOSources(
   const tx = db.transaction(() => {
     for (const s of sources) {
       insert.run(keywordId, s.position, s.url, s.domainRoot, s.domainFull, s.aioSnippet, s.resultType)
+    }
+  })
+  tx()
+}
+
+export function insertOrganicRankings(
+  keywordId: number,
+  rankings: { domainRoot: string; domainFull: string; position: number; url: string }[]
+): void {
+  if (rankings.length === 0) return
+  const db = getDB()
+  const stmt = db.prepare(
+    `INSERT INTO organic_rankings (keyword_id, domain_root, domain_full, position, url)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  const tx = db.transaction(() => {
+    for (const r of rankings) {
+      stmt.run(keywordId, r.domainRoot, r.domainFull, r.position, r.url)
     }
   })
   tx()
@@ -772,6 +804,7 @@ export function getEnrichStats(): { total: number; enriched: number } {
 
 export function clearProjectData(): void {
   getDB().exec(`
+    DELETE FROM organic_rankings;
     DELETE FROM snippet_matches;
     DELETE FROM page_sections;
     DELETE FROM crawled_pages;
