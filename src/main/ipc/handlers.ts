@@ -34,6 +34,7 @@ import {
   getTopicKeywords,
   updateTopicLabel,
   getTopicAIOSnippets,
+  getTopicElementBreakdown,
 } from '../db'
 import { runClustering } from '../topics/run'
 import { runEnrichment } from '../fanout/enrich'
@@ -428,7 +429,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     const topicData = topics.map(topic => ({
       topic,
-      keywords: getTopicKeywords(topic.id)
+      keywords: getTopicKeywords(topic.id),
+      elements: getTopicElementBreakdown(topic.id)
     }))
 
     const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })

@@ -6,7 +6,7 @@ export interface ReportData {
   meta: ProjectMeta
   stats: ProjectStats
   pivot: AIODomainPivotRow[]   // top domains × positions 1-10
-  topics: { topic: TopicRow; keywords: TopicKeywordRow[] }[]
+  topics: { topic: TopicRow; keywords: TopicKeywordRow[]; elements: { sectionType: string; count: number }[] }[]
   generatedAt: number
 }
 
@@ -24,7 +24,7 @@ export function buildReportHTML(d: ReportData): string {
 
   const topDomains = d.pivot.slice(0, 25)
 
-  const topicSections = d.topics.map(({ topic, keywords }) => {
+  const topicSections = d.topics.map(({ topic, keywords, elements }) => {
     const kwRows = keywords.map(kw => {
       const intentColor = kw.searchIntent ? (INTENT_COLORS[kw.searchIntent] ?? '#6b7280') : ''
       const intentBadge = kw.searchIntent
@@ -51,6 +51,28 @@ export function buildReportHTML(d: ReportData): string {
       ? topic.totalSearchVolume.toLocaleString() + '/mo'
       : '—'
 
+    // Element breakdown bar chart
+    const totalMatches = elements.reduce((s, e) => s + e.count, 0)
+    const elementBars = elements.slice(0, 8).map(e => {
+      const pct = totalMatches > 0 ? Math.round((e.count / totalMatches) * 100) : 0
+      const tag = escHtml(e.sectionType)
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-size:10px;font-family:monospace;color:#374151;width:72px;flex-shrink:0">&lt;${tag}&gt;</span>
+        <div style="flex:1;background:#f3f4f6;border-radius:3px;overflow:hidden;height:12px">
+          <div style="width:${pct}%;height:100%;background:#3b82f6;border-radius:3px"></div>
+        </div>
+        <span style="font-size:10px;color:#6b7280;width:32px;text-align:right;flex-shrink:0">${pct}%</span>
+        <span style="font-size:10px;color:#9ca3af;width:36px;flex-shrink:0">${e.count.toLocaleString()}</span>
+      </div>`
+    }).join('')
+
+    const elementsSection = elements.length > 0
+      ? `<div style="padding:10px 16px 12px;border-top:1px solid #f3f4f6">
+           <div style="font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Best-Performing HTML Elements</div>
+           ${elementBars}
+         </div>`
+      : ''
+
     return `
     <div style="break-inside:avoid;margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
       <div style="background:#f9fafb;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
@@ -65,6 +87,7 @@ export function buildReportHTML(d: ReportData): string {
           ${kwRows || '<tr><td style="color:#9ca3af;font-size:12px;padding:4px 0">No keywords loaded</td></tr>'}
         </table>
       </div>
+      ${elementsSection}
     </div>`
   }).join('')
 

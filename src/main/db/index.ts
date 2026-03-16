@@ -862,6 +862,21 @@ export function updateTopicLabel(topicId: number, label: string): void {
   getDB().prepare(`UPDATE topics SET label = ? WHERE id = ?`).run(label, topicId)
 }
 
+// Returns HTML element type → match count for all snippet matches tied to a topic's keywords.
+// Used in the report to show which elements work best per topic cluster.
+export function getTopicElementBreakdown(topicId: number): { sectionType: string; count: number }[] {
+  return getDB().prepare(
+    `SELECT ps.section_type AS sectionType, COUNT(*) AS count
+     FROM snippet_matches sm
+     JOIN page_sections ps ON sm.page_section_id = ps.id
+     JOIN aio_sources a    ON sm.aio_source_id   = a.id
+     JOIN topic_keywords tk ON tk.keyword_id     = a.keyword_id
+     WHERE tk.topic_id = ?
+     GROUP BY ps.section_type
+     ORDER BY count DESC`
+  ).all(topicId) as { sectionType: string; count: number }[]
+}
+
 // Returns up to 20 non-null AIO snippets for keywords in a topic
 export function getTopicAIOSnippets(topicId: number): string[] {
   const rows = getDB().prepare(
