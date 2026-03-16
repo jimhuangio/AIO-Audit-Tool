@@ -100,7 +100,7 @@ export function KeywordsView(): JSX.Element {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDomains, domainDataKey])
 
-  const organicDataKey = organicPositionResults.map(r => r.dataUpdatedAt).join(',')
+  const organicDataKey = organicPositionResults.map(r => r.dataUpdatedAt ?? 0).join(',')
   const organicPositionMaps = useMemo(() => {
     const maps: Record<string, Record<number, number>> = {}
     organicDomains.forEach((domain, i) => {
@@ -250,6 +250,15 @@ export function KeywordsView(): JSX.Element {
               >
                 Import CSV
               </button>
+              <button
+                onClick={async () => {
+                  await window.api.exportKeywordsCSV(selectedDomains)
+                }}
+                disabled={selectedDomains.length === 0}
+                className="px-3 py-1.5 text-xs bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Export CSV
+              </button>
               {insertResult && (
                 <span className="text-xs text-green-600 text-center">
                   +{insertResult.inserted} new
@@ -326,7 +335,7 @@ export function KeywordsView(): JSX.Element {
                   title={hasOrganic ? 'Hide organic rank column' : 'Show organic rank column'}
                   className={`transition-colors ml-0.5 px-0.5 rounded ${
                     hasOrganic
-                      ? 'text-white bg-blue-600 hover:bg-blue-700'
+                      ? 'text-white bg-green-600 hover:bg-green-700'
                       : 'text-blue-300 hover:text-blue-600'
                   }`}
                 >
@@ -411,7 +420,6 @@ export function KeywordsView(): JSX.Element {
                       </th>
                       {organicDomains.includes(domain) && (
                         <th
-                          key={`organic_${domain}`}
                           onClick={() => handleSort(`organic_${domain}`)}
                           className="px-3 py-2 text-right text-xs font-medium text-green-700 sticky top-0 bg-gray-50 cursor-pointer select-none hover:bg-gray-100 transition-colors whitespace-nowrap font-mono"
                         >
