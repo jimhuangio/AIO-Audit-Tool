@@ -4,10 +4,9 @@ import { useAppStore } from '../store/app-store'
 import type { JobCounts } from '../../../types'
 
 export function JobStatusBar(): JSX.Element {
-  const { jobCounts, setJobCounts, runStatus, setRunStatus } = useAppStore()
+  const { jobCounts, setJobCounts, runStatus, setRunStatus, enrichProgress, setEnrichProgress } = useAppStore()
   const queryClient = useQueryClient()
   const [runError, setRunError] = useState<string>('')
-  const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number } | null>(null)
 
   // Subscribe to progress events from main process
   useEffect(() => {

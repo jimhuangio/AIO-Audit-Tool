@@ -713,13 +713,15 @@ export function clearTopics(): void {
 // Preserves the `project` and `_meta` tables (settings + schema version).
 // ─── Keyword enrichment (search volume + intent) ──────────────────────────────
 
-// All done/error keywords that have not yet been enriched
+// All done/error keywords that have not yet been enriched with volume or intent.
+// category_id is excluded from this check — categories API failures should not
+// cause keywords to re-enrich indefinitely.
 export function getUnenrichedKeywords(): { id: number; keyword: string }[] {
   return getDB()
     .prepare(
       `SELECT id, keyword FROM keywords
        WHERE status IN ('done', 'error')
-         AND (search_volume IS NULL OR search_intent IS NULL OR category_id IS NULL)`
+         AND (search_volume IS NULL OR search_intent IS NULL)`
     )
     .all() as { id: number; keyword: string }[]
 }
@@ -727,8 +729,15 @@ export function getUnenrichedKeywords(): { id: number; keyword: string }[] {
 export function upsertKeywordEnrichment(
   updates: { id: number; searchVolume: number | null; searchIntent: string | null; categoryId: number | null; categoryName: string | null }[]
 ): void {
+  // COALESCE ensures a null value from a failed API call never overwrites
+  // previously-saved good data for that keyword.
   const stmt = getDB().prepare(
-    `UPDATE keywords SET search_volume = ?, search_intent = ?, category_id = ?, category_name = ? WHERE id = ?`
+    `UPDATE keywords
+     SET search_volume = COALESCE(?, search_volume),
+         search_intent = COALESCE(?, search_intent),
+         category_id   = COALESCE(?, category_id),
+         category_name = COALESCE(?, category_name)
+     WHERE id = ?`
   )
   const tx = getDB().transaction(() => {
     for (const u of updates) {

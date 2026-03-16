@@ -33,7 +33,8 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export function KeywordsView(): JSX.Element {
-  const { project, runStatus } = useAppStore()
+  const { project, runStatus, enrichProgress } = useAppStore()
+  const enriching = enrichProgress !== null
   const queryClient = useQueryClient()
   const [pasteText, setPasteText] = useState('')
   const [inserting, setInserting] = useState(false)
@@ -331,19 +332,25 @@ export function KeywordsView(): JSX.Element {
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
                   {([
-                    { key: 'keyword', label: 'Keyword',          align: 'left'  },
-                    { key: 'status',  label: 'Status',           align: 'left'  },
-                    { key: 'depth',   label: 'Depth',            align: 'left'  },
-                    { key: 'aio',     label: 'AIO Results',      align: 'right' },
-                    { key: 'volume',  label: 'Est. Monthly Volume', align: 'right' },
-                    { key: 'intent',  label: 'Intent',           align: 'left'  },
-                  ] as const).map(({ key, label, align }) => (
+                    { key: 'keyword', label: 'Keyword',             align: 'left'  },
+                    { key: 'status',  label: 'Status',              align: 'left'  },
+                    { key: 'depth',   label: 'Depth',               align: 'left'  },
+                    { key: 'aio',     label: 'AIO Results',         align: 'right' },
+                    { key: 'volume',  label: 'Est. Monthly Volume', align: 'right', enriching: true },
+                    { key: 'intent',  label: 'Intent',              align: 'left',  enriching: true },
+                  ] as const).map(({ key, label, align, ...rest }) => (
                     <th
                       key={key}
                       onClick={() => handleSort(key)}
                       className={`px-3 py-2 text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 cursor-pointer select-none hover:bg-gray-100 transition-colors whitespace-nowrap text-${align}`}
                     >
-                      {label}<SortIcon sortKey={sortKey} col={key} sortDir={sortDir} />
+                      {label}
+                      {'enriching' in rest && enriching && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 text-amber-500 animate-pulse">
+                          ↻
+                        </span>
+                      )}
+                      <SortIcon sortKey={sortKey} col={key} sortDir={sortDir} />
                     </th>
                   ))}
                   {selectedDomains.map((domain) => (
@@ -400,7 +407,9 @@ export function KeywordsView(): JSX.Element {
                       <td className="px-3 py-1.5 text-xs text-right tabular-nums">
                         {kw.searchVolume != null
                           ? <span className="text-gray-700">{kw.searchVolume.toLocaleString()}</span>
-                          : <span className="text-gray-200">—</span>
+                          : enriching && kw.status === 'done'
+                            ? <span className="inline-block w-12 h-3 bg-amber-100 rounded animate-pulse" />
+                            : <span className="text-gray-200">—</span>
                         }
                       </td>
                       <td className="px-3 py-1.5 text-xs">
@@ -408,7 +417,9 @@ export function KeywordsView(): JSX.Element {
                           ? <span className={`px-1.5 py-0.5 rounded text-xs capitalize ${INTENT_COLORS[kw.searchIntent] ?? 'bg-gray-100 text-gray-600'}`}>
                               {kw.searchIntent}
                             </span>
-                          : <span className="text-gray-200">—</span>
+                          : enriching && kw.status === 'done'
+                            ? <span className="inline-block w-16 h-4 bg-amber-100 rounded animate-pulse" />
+                            : <span className="text-gray-200">—</span>
                         }
                       </td>
                       {selectedDomains.map((domain) => {

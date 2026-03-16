@@ -21,6 +21,8 @@ interface AppState {
   setRunStatus: (s: RunStatus) => void
   jobCounts: JobCounts
   setJobCounts: (c: JobCounts) => void
+  enrichProgress: { done: number; total: number } | null
+  setEnrichProgress: (p: { done: number; total: number } | null) => void
 
   // MCP connection
   mcpConnected: boolean
@@ -45,6 +47,8 @@ export const useAppStore = create<AppState>((set) => ({
   setRunStatus: (s) => set({ runStatus: s }),
   jobCounts: { pending: 0, queued: 0, running: 0, done: 0, error: 0 },
   setJobCounts: (c) => set({ jobCounts: c }),
+  enrichProgress: null,
+  setEnrichProgress: (p) => set({ enrichProgress: p }),
 
   // MCP
   mcpConnected: false,
