@@ -37,12 +37,14 @@ import {
   insertAIOSources,
   insertPAAQuestions,
   insertChildKeywords,
-  getProjectMeta
+  getProjectMeta,
+  insertOrganicRankings
 } from '../db'
 import {
   extractAIOSources,
   extractPAAQuestions,
-  extractSuggestedSearches
+  extractSuggestedSearches,
+  extractOrganicResults
 } from './extract'
 
 export interface WorkerCallbacks {
@@ -83,6 +85,12 @@ export async function processKeyword(
     if (aioSources.length > 0) {
       insertAIOSources(keywordId, aioSources)
       callbacks.onNewURLs?.(aioSources.map(s => s.url))
+    }
+
+    // Extract and store organic rankings
+    const organicResults = extractOrganicResults(serpData)
+    if (organicResults.length > 0) {
+      insertOrganicRankings(keywordId, organicResults)
     }
 
     const paaQuestions = extractPAAQuestions(serpData)

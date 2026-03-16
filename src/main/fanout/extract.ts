@@ -18,6 +18,13 @@ export interface ExtractedPAAQuestion {
   aiAnswer: string | null
 }
 
+export interface ExtractedOrganicResult {
+  domainRoot: string
+  domainFull: string
+  position: number
+  url: string
+}
+
 // ─── Domain helpers ───────────────────────────────────────────────────────────
 
 export function parseDomainFull(url: string): string {
@@ -126,6 +133,23 @@ export function extractSuggestedSearches(apiResponse: unknown): string[] {
   return rsItems
     .map((r: any) => r?.title ?? r?.query ?? r)
     .filter((q: any) => typeof q === 'string' && q.length > 0)
+}
+
+// ─── Organic results extraction ───────────────────────────────────────────────
+
+export function extractOrganicResults(apiResponse: unknown): ExtractedOrganicResult[] {
+  return getItems(apiResponse)
+    .filter((i: any) => i?.type === 'organic' && i?.url)
+    .map((i: any) => {
+      const domainFull = parseDomainFull(i.url)
+      return {
+        domainFull,
+        domainRoot: parseDomainRoot(domainFull),
+        position: i.rank_absolute ?? i.position ?? 0,
+        url: i.url
+      }
+    })
+    .filter((r) => r.position > 0)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
