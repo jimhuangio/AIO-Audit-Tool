@@ -145,7 +145,14 @@ export class FanoutScheduler {
 
   private startEnrichment(): void {
     console.log('[scheduler] starting enrichment')
-    runEnrichment(() => !this.running)
+    runEnrichment(
+      () => !this.running,
+      (done, total) => {
+        if (this.window && !this.window.isDestroyed()) {
+          this.window.webContents.send('enrich:progress', { done, total })
+        }
+      }
+    )
       .catch((err) => console.error('[scheduler] enrichment error:', err))
       .then(async () => {
         // Final topic cluster pass with all enriched data

@@ -186,6 +186,12 @@ const api = {
   generateTopicBrief: (topicId: number): Promise<ContentBrief> =>
     ipcRenderer.invoke('topics:generateBrief', topicId),
 
+  onEnrichProgress: (callback: (data: { done: number; total: number }) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, data: { done: number; total: number }): void => callback(data)
+    ipcRenderer.on('enrich:progress', handler)
+    return () => ipcRenderer.removeListener('enrich:progress', handler)
+  },
+
   // ─── Report ───────────────────────────────────────────────────────────────
   generateReport: (): Promise<{ filePath: string }> =>
     ipcRenderer.invoke('report:generate'),
