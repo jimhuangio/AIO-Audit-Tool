@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../store/app-store'
 import { KeywordDetailPanel } from './KeywordDetailPanel'
@@ -42,6 +42,7 @@ export function KeywordsView(): JSX.Element {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterText, setFilterText] = useState('')
   const [selectedDomains, setSelectedDomains] = useState<string[]>([])
+  const [organicDomains, setOrganicDomains] = useState<string[]>([])
   const [domainInput, setDomainInput] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const domainRef = useRef<HTMLDivElement>(null)
@@ -73,6 +74,15 @@ export function KeywordsView(): JSX.Element {
     }))
   })
 
+  // One organic position query per domain with organic toggle enabled
+  const organicPositionResults = useQueries({
+    queries: organicDomains.map((domain) => ({
+      queryKey: ['keywords', 'organicPositions', domain],
+      queryFn: () => window.api.getOrganicPositionsForDomain(domain),
+      enabled: !!project
+    }))
+  })
+
   // Stable key derived from data update timestamps — prevents re-running when the
   // useQueries array reference changes but no data has actually updated.
   const domainDataKey = domainPositionResults.map(r => r.dataUpdatedAt ?? 0).join(',')
@@ -89,6 +99,19 @@ export function KeywordsView(): JSX.Element {
     return maps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDomains, domainDataKey])
+
+  const organicDataKey = organicPositionResults.map(r => r.dataUpdatedAt).join(',')
+  const organicPositionMaps = useMemo(() => {
+    const maps: Record<string, Record<number, number>> = {}
+    organicDomains.forEach((domain, i) => {
+      const data = organicPositionResults[i]?.data ?? []
+      const map: Record<number, number> = {}
+      data.forEach(({ keywordId, position }) => { map[keywordId] = position })
+      maps[domain] = map
+    })
+    return maps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organicDomains, organicDataKey])
 
   const filtered = useMemo(() => {
     const rows = keywords.filter((k) => {
@@ -121,8 +144,12 @@ export function KeywordsView(): JSX.Element {
       } else if (sortKey === 'intent') {
         valA = a.searchIntent ?? ''
         valB = b.searchIntent ?? ''
+      } else if (sortKey.startsWith('organic_')) {
+        const domain = sortKey.slice('organic_'.length)
+        valA = organicPositionMaps[domain]?.[a.id] ?? Infinity
+        valB = organicPositionMaps[domain]?.[b.id] ?? Infinity
       } else {
-        // domain column — lower position is better; missing = treat as 99
+        // AIO domain column — lower position is better; missing = treat as 99
         valA = domainPositionMaps[sortKey]?.[a.id] ?? 99
         valB = domainPositionMaps[sortKey]?.[b.id] ?? 99
       }
@@ -131,7 +158,7 @@ export function KeywordsView(): JSX.Element {
       if (valA > valB) return sortDir === 'asc' ? 1 : -1
       return 0
     })
-  }, [keywords, filterStatus, filterText, sortKey, sortDir, domainPositionMaps])
+  }, [keywords, filterStatus, filterText, sortKey, sortDir, domainPositionMaps, organicPositionMaps])
 
   function handleSort(key: string): void {
     if (sortKey === key) {
@@ -151,7 +178,14 @@ export function KeywordsView(): JSX.Element {
   }
 
   function removeDomain(domain: string): void {
-    setSelectedDomains((prev) => prev.filter((d) => d !== domain))
+    setSelectedDomains(prev => prev.filter(d => d !== domain))
+    setOrganicDomains(prev => prev.filter(d => d !== domain))
+  }
+
+  function toggleOrganicDomain(domain: string): void {
+    setOrganicDomains(prev =>
+      prev.includes(domain) ? prev.filter(d => d !== domain) : [...prev, domain]
+    )
   }
 
   async function handleInsert(): Promise<void> {
@@ -279,20 +313,34 @@ export function KeywordsView(): JSX.Element {
           </div>
 
           {/* Active domain chips */}
-          {selectedDomains.map((domain) => (
-            <span
-              key={domain}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700 font-mono"
-            >
-              {domain}
-              <button
-                onClick={() => removeDomain(domain)}
-                className="text-blue-400 hover:text-blue-700 transition-colors ml-0.5"
+          {selectedDomains.map((domain) => {
+            const hasOrganic = organicDomains.includes(domain)
+            return (
+              <span
+                key={domain}
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700 font-mono"
               >
-                ✕
-              </button>
-            </span>
-          ))}
+                {domain}
+                <button
+                  onClick={() => toggleOrganicDomain(domain)}
+                  title={hasOrganic ? 'Hide organic rank column' : 'Show organic rank column'}
+                  className={`transition-colors ml-0.5 px-0.5 rounded ${
+                    hasOrganic
+                      ? 'text-white bg-blue-600 hover:bg-blue-700'
+                      : 'text-blue-300 hover:text-blue-600'
+                  }`}
+                >
+                  #
+                </button>
+                <button
+                  onClick={() => removeDomain(domain)}
+                  className="text-blue-400 hover:text-blue-700 transition-colors"
+                >
+                  ✕
+                </button>
+              </span>
+            )
+          })}
 
           {/* Status pills */}
           <div className="flex items-center gap-1 ml-auto">
@@ -354,13 +402,26 @@ export function KeywordsView(): JSX.Element {
                     </th>
                   ))}
                   {selectedDomains.map((domain) => (
-                    <th
-                      key={domain}
-                      onClick={() => handleSort(domain)}
-                      className="px-3 py-2 text-right text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 cursor-pointer select-none hover:bg-gray-100 transition-colors whitespace-nowrap font-mono"
-                    >
-                      {domain}<SortIcon sortKey={sortKey} col={domain} sortDir={sortDir} />
-                    </th>
+                    <React.Fragment key={domain}>
+                      <th
+                        onClick={() => handleSort(domain)}
+                        className="px-3 py-2 text-right text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 cursor-pointer select-none hover:bg-gray-100 transition-colors whitespace-nowrap font-mono"
+                      >
+                        {domain}<SortIcon sortKey={sortKey} col={domain} sortDir={sortDir} />
+                      </th>
+                      {organicDomains.includes(domain) && (
+                        <th
+                          key={`organic_${domain}`}
+                          onClick={() => handleSort(`organic_${domain}`)}
+                          className="px-3 py-2 text-right text-xs font-medium text-green-700 sticky top-0 bg-gray-50 cursor-pointer select-none hover:bg-gray-100 transition-colors whitespace-nowrap font-mono"
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            {domain} <span className="text-green-500">#</span>
+                            <SortIcon sortKey={sortKey} col={`organic_${domain}`} sortDir={sortDir} />
+                          </span>
+                        </th>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tr>
               </thead>
@@ -423,17 +484,29 @@ export function KeywordsView(): JSX.Element {
                         }
                       </td>
                       {selectedDomains.map((domain) => {
-                        const pos = domainPositionMaps[domain]?.[kw.id]
+                        const aioPos = domainPositionMaps[domain]?.[kw.id]
+                        const orgPos = organicPositionMaps[domain]?.[kw.id]
                         return (
-                          <td key={domain} className="px-3 py-1.5 text-xs text-right tabular-nums">
-                            {pos != null ? (
-                              <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-600 text-white text-xs font-bold">
-                                {pos}
-                              </span>
-                            ) : (
-                              <span className="text-gray-200">—</span>
+                          <React.Fragment key={domain}>
+                            <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                              {aioPos != null ? (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-600 text-white text-xs font-bold">
+                                  {aioPos}
+                                </span>
+                              ) : (
+                                <span className="text-gray-200">—</span>
+                              )}
+                            </td>
+                            {organicDomains.includes(domain) && (
+                              <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                                {orgPos != null ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-green-600 text-white text-xs font-bold">
+                                    {orgPos}
+                                  </span>
+                                ) : null}
+                              </td>
                             )}
-                          </td>
+                          </React.Fragment>
                         )
                       })}
                     </tr>
