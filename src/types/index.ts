@@ -171,3 +171,30 @@ export interface TopicKeywordRow {
   searchVolume: number | null
   searchIntent: string | null
 }
+
+// ─── Category hierarchy ───────────────────────────────────────────────────────
+
+export interface SubCategoryRow {
+  id: number
+  mainCategoryId: number
+  label: string
+  position: number
+  totalSearchVolume: number
+  topDomain: string | null
+  bestDomain: string | null
+  bestDomainPosition: number | null
+  topics: TopicRow[]
+}
+
+export interface MainCategoryRow {
+  id: number
+  label: string
+  position: number
+  totalSearchVolume: number
+  subCategories: SubCategoryRow[]
+}
+
+export interface CategoryHierarchy {
+  mainCategories: MainCategoryRow[]
+  uncategorised: TopicRow[]
+}
