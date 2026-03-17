@@ -1,7 +1,7 @@
 // All CREATE TABLE statements for a project DB.
 // Run once on project creation; migrations handle schema changes.
 
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 
 export const CREATE_TABLES = `
 PRAGMA journal_mode=WAL;
@@ -131,7 +131,21 @@ CREATE TABLE IF NOT EXISTS topics (
   id       INTEGER PRIMARY KEY,
   label    TEXT NOT NULL,
   keywords TEXT NOT NULL,
-  centroid TEXT
+  centroid TEXT,
+  sub_category_id INTEGER REFERENCES sub_categories(id)
+);
+
+CREATE TABLE IF NOT EXISTS main_categories (
+  id       INTEGER PRIMARY KEY,
+  label    TEXT    NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sub_categories (
+  id               INTEGER PRIMARY KEY,
+  main_category_id INTEGER NOT NULL REFERENCES main_categories(id),
+  label            TEXT    NOT NULL,
+  position         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS topic_keywords (
@@ -191,5 +205,19 @@ export const MIGRATIONS: Record<number, string> = {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_or_keyword_domain
        ON organic_rankings(keyword_id, domain_root)`
+  ].join(';\n'),
+  12: [
+    `CREATE TABLE IF NOT EXISTS main_categories (
+      id       INTEGER PRIMARY KEY,
+      label    TEXT    NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS sub_categories (
+      id               INTEGER PRIMARY KEY,
+      main_category_id INTEGER NOT NULL REFERENCES main_categories(id),
+      label            TEXT    NOT NULL,
+      position         INTEGER NOT NULL DEFAULT 0
+    )`,
+    `ALTER TABLE topics ADD COLUMN sub_category_id INTEGER REFERENCES sub_categories(id)`
   ].join(';\n')
 }
