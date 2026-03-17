@@ -106,16 +106,14 @@ export function TopicsView(): JSX.Element {
         const currentSubId = hierarchy?.mainCategories
           .flatMap(mc => mc.subCategories)
           .find(sc => sc.topics.some(t => t.id === drag.id))?.id
-        if (currentSubId === targetSubCategoryId) {
-          dragRef.current = null
-          return
-        }
+        if (currentSubId === targetSubCategoryId) return
         await window.api.updateTopicCategory(drag.id, targetSubCategoryId)
       }
-      dragRef.current = null
       queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
     } catch (err) {
       console.error('handleDropOnSub failed:', err)
+    } finally {
+      dragRef.current = null
     }
   }
 
@@ -125,10 +123,11 @@ export function TopicsView(): JSX.Element {
     if (!drag || drag.type !== 'subcategory') return
     try {
       await window.api.moveSubCategory(drag.id, targetMainCategoryId)
-      dragRef.current = null
       queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
     } catch (err) {
       console.error('handleDropOnMain failed:', err)
+    } finally {
+      dragRef.current = null
     }
   }
 
