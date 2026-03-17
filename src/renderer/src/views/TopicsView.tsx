@@ -65,12 +65,17 @@ export function TopicsView(): JSX.Element {
 
   async function saveRename(newLabel: string): Promise<void> {
     if (!renameTarget || !newLabel.trim()) { setRenameTarget(null); return }
-    if (renameTarget.type === 'main') await window.api.renameMainCategory(renameTarget.id, newLabel)
-    else if (renameTarget.type === 'sub') await window.api.renameSubCategory(renameTarget.id, newLabel)
-    else await window.api.updateTopicLabel(renameTarget.id, newLabel)
-    setRenameTarget(null)
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
-    queryClient.invalidateQueries({ queryKey: ['topics'] })
+    try {
+      if (renameTarget.type === 'main') await window.api.renameMainCategory(renameTarget.id, newLabel)
+      else if (renameTarget.type === 'sub') await window.api.renameSubCategory(renameTarget.id, newLabel)
+      else await window.api.updateTopicLabel(renameTarget.id, newLabel)
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+      queryClient.invalidateQueries({ queryKey: ['topics'] })
+    } catch (err) {
+      console.error('saveRename failed:', err)
+    } finally {
+      setRenameTarget(null)
+    }
   }
 
   // ─── Drag and drop ───────────────────────────────────────────────────────────
@@ -95,20 +100,36 @@ export function TopicsView(): JSX.Element {
     e.preventDefault()
     const drag = dragRef.current
     if (!drag) return
-    if (drag.type === 'topic') {
-      await window.api.updateTopicCategory(drag.id, targetSubCategoryId)
+    try {
+      if (drag.type === 'topic') {
+        // Guard: skip if already in the target sub-category
+        const currentSubId = hierarchy?.mainCategories
+          .flatMap(mc => mc.subCategories)
+          .find(sc => sc.topics.some(t => t.id === drag.id))?.id
+        if (currentSubId === targetSubCategoryId) {
+          dragRef.current = null
+          return
+        }
+        await window.api.updateTopicCategory(drag.id, targetSubCategoryId)
+      }
+      dragRef.current = null
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    } catch (err) {
+      console.error('handleDropOnSub failed:', err)
     }
-    dragRef.current = null
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
   }
 
   async function handleDropOnMain(e: React.DragEvent, targetMainCategoryId: number): Promise<void> {
     e.preventDefault()
     const drag = dragRef.current
     if (!drag || drag.type !== 'subcategory') return
-    await window.api.moveSubCategory(drag.id, targetMainCategoryId)
-    dragRef.current = null
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    try {
+      await window.api.moveSubCategory(drag.id, targetMainCategoryId)
+      dragRef.current = null
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    } catch (err) {
+      console.error('handleDropOnMain failed:', err)
+    }
   }
 
   // ─── Context menu ────────────────────────────────────────────────────────────
@@ -134,36 +155,52 @@ export function TopicsView(): JSX.Element {
 
   async function handleMoveTopicToSub(subCategoryId: number): Promise<void> {
     if (!ctxMenu || ctxMenu.type !== 'topic') return
-    await window.api.updateTopicCategory(ctxMenu.id, subCategoryId)
-    setCtxMenu(null)
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    try {
+      await window.api.updateTopicCategory(ctxMenu.id, subCategoryId)
+      setCtxMenu(null)
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    } catch (err) {
+      console.error('handleMoveTopicToSub failed:', err)
+    }
   }
 
   async function handleMoveTopicToNewSub(): Promise<void> {
-    if (!ctxMenu || ctxMenu.type !== 'topic' || !ctxMenu.parentMainCategoryId) return
+    if (!ctxMenu || ctxMenu.type !== 'topic' || !ctxMenu.parentMainCategoryId || ctxMenu.parentMainCategoryId < 0) return
     const { x, y, parentMainCategoryId, id: topicId } = ctxMenu
-    const newSubId = await window.api.createSubCategory('New Sub-category', parentMainCategoryId)
-    await window.api.updateTopicCategory(topicId, newSubId)
-    setCtxMenu(null)
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
-    startRename('sub', newSubId, 'New Sub-category', x, y)
+    try {
+      setCtxMenu(null)
+      const newSubId = await window.api.createSubCategory('New Sub-category', parentMainCategoryId)
+      await window.api.updateTopicCategory(topicId, newSubId)
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+      startRename('sub', newSubId, 'New Sub-category', x, y)
+    } catch (err) {
+      console.error('handleMoveTopicToNewSub failed:', err)
+    }
   }
 
   async function handleMoveSubToMain(mainCategoryId: number): Promise<void> {
     if (!ctxMenu || ctxMenu.type !== 'sub') return
-    await window.api.moveSubCategory(ctxMenu.id, mainCategoryId)
-    setCtxMenu(null)
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    try {
+      await window.api.moveSubCategory(ctxMenu.id, mainCategoryId)
+      setCtxMenu(null)
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    } catch (err) {
+      console.error('handleMoveSubToMain failed:', err)
+    }
   }
 
   async function handleMoveSubToNewMain(): Promise<void> {
     if (!ctxMenu || ctxMenu.type !== 'sub') return
     const { x, y, id: subId } = ctxMenu
-    const newMainId = await window.api.createMainCategory('New Category')
-    await window.api.moveSubCategory(subId, newMainId)
-    setCtxMenu(null)
-    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
-    startRename('main', newMainId, 'New Category', x, y)
+    try {
+      setCtxMenu(null)
+      const newMainId = await window.api.createMainCategory('New Category')
+      await window.api.moveSubCategory(subId, newMainId)
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+      startRename('main', newMainId, 'New Category', x, y)
+    } catch (err) {
+      console.error('handleMoveSubToNewMain failed:', err)
+    }
   }
 
   // Dismiss context menu on Escape
@@ -185,25 +222,29 @@ export function TopicsView(): JSX.Element {
 
   // id convention: positive = topic, negative 1-99999 = -(subCategoryId), -(id+100000) = main cat
   async function handleBrief(id: number): Promise<void> {
-    if (id >= 0) {
-      const result = await window.api.generateTopicBrief(id)
-      setBriefModal({ topicLabel: `Topic #${id}`, brief: result.brief })
-    } else if (id > -100000) {
-      const subCatId = -id
-      const sc = hierarchy?.mainCategories.flatMap(mc => mc.subCategories).find(s => s.id === subCatId)
-      if (!sc) return
-      const topTopic = sc.topics[0]
-      if (!topTopic) return
-      const result = await window.api.generateTopicBrief(topTopic.id)
-      setBriefModal({ topicLabel: sc.label, brief: result.brief })
-    } else {
-      const mainId = -(id + 100000)
-      const mc = hierarchy?.mainCategories.find(m => m.id === mainId)
-      if (!mc || mc.subCategories.length === 0) return
-      const topTopic = mc.subCategories[0]?.topics[0]
-      if (!topTopic) return
-      const result = await window.api.generateTopicBrief(topTopic.id)
-      setBriefModal({ topicLabel: mc.label, brief: result.brief })
+    try {
+      if (id >= 0) {
+        const result = await window.api.generateTopicBrief(id)
+        setBriefModal({ topicLabel: `Topic #${id}`, brief: result.brief })
+      } else if (id > -100000) {
+        const subCatId = -id
+        const sc = hierarchy?.mainCategories.flatMap(mc => mc.subCategories).find(s => s.id === subCatId)
+        if (!sc) return
+        const topTopic = sc.topics[0]
+        if (!topTopic) return
+        const result = await window.api.generateTopicBrief(topTopic.id)
+        setBriefModal({ topicLabel: sc.label, brief: result.brief })
+      } else {
+        const mainId = -(id + 100000)
+        const mc = hierarchy?.mainCategories.find(m => m.id === mainId)
+        if (!mc || mc.subCategories.length === 0) return
+        const topTopic = mc.subCategories[0]?.topics[0]
+        if (!topTopic) return
+        const result = await window.api.generateTopicBrief(topTopic.id)
+        setBriefModal({ topicLabel: mc.label, brief: result.brief })
+      }
+    } catch (err) {
+      console.error('handleBrief failed:', err)
     }
   }
 
@@ -325,11 +366,11 @@ export function TopicsView(): JSX.Element {
                       </button>
                       Uncategorised
                       <span className="ml-2 text-xs font-normal text-gray-400">
-                        {hierarchy!.uncategorised.length} topic{hierarchy!.uncategorised.length !== 1 ? 's' : ''}
+                        {hierarchy?.uncategorised.length} topic{hierarchy?.uncategorised.length !== 1 ? 's' : ''}
                       </span>
                     </td>
                   </tr>
-                  {expandedSubs.has(-1) && hierarchy!.uncategorised.map(topic => (
+                  {expandedSubs.has(-1) && hierarchy?.uncategorised.map(topic => (
                     <TopicRow
                       key={topic.id}
                       topic={topic}
