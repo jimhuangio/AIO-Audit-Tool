@@ -1,14 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../store/app-store'
-import type { TopicRow, TopicKeywordRow, ContentBrief } from '../../../types'
-
-const INTENT_COLORS: Record<string, string> = {
-  informational:  'bg-blue-100 text-blue-700',
-  commercial:     'bg-yellow-100 text-yellow-700',
-  transactional:  'bg-green-100 text-green-700',
-  navigational:   'bg-gray-100 text-gray-600',
-}
+import type { ContentBrief } from '../../../types'
+import { CategoryRow } from '../components/CategoryRow'
+import { TopicRow } from '../components/TopicRow'
 
 export function TopicsView(): JSX.Element {
   const { project } = useAppStore()
@@ -17,9 +12,9 @@ export function TopicsView(): JSX.Element {
   const [runMsg, setRunMsg] = useState('')
   const [briefModal, setBriefModal] = useState<{ topicLabel: string; brief: ContentBrief } | null>(null)
 
-  const { data: topics = [], isLoading } = useQuery({
-    queryKey: ['topics'],
-    queryFn: () => window.api.getTopics(),
+  const { data: hierarchy, isLoading } = useQuery({
+    queryKey: ['categories', 'hierarchy'],
+    queryFn: () => window.api.getCategoryHierarchy(),
     enabled: !!project
   })
 
@@ -27,8 +22,192 @@ export function TopicsView(): JSX.Element {
   useEffect(() => {
     return window.api.onTopicsUpdated(() => {
       queryClient.invalidateQueries({ queryKey: ['topics'] })
+      queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
     })
   }, [queryClient])
+
+  // ─── Collapse state ──────────────────────────────────────────────────────────
+
+  const [expandedSubs, setExpandedSubs] = useState<Set<number>>(new Set())
+
+  function toggleSub(subId: number): void {
+    setExpandedSubs(prev => {
+      const next = new Set(prev)
+      if (next.has(subId)) next.delete(subId)
+      else next.add(subId)
+      return next
+    })
+  }
+
+  function toggleAllInMain(mainCategoryId: number, expand: boolean): void {
+    const mc = hierarchy?.mainCategories.find(m => m.id === mainCategoryId)
+    if (!mc) return
+    setExpandedSubs(prev => {
+      const next = new Set(prev)
+      mc.subCategories.forEach(sc => expand ? next.add(sc.id) : next.delete(sc.id))
+      return next
+    })
+  }
+
+  // ─── Inline rename ───────────────────────────────────────────────────────────
+
+  const [renameTarget, setRenameTarget] = useState<{
+    type: 'main' | 'sub' | 'topic'
+    id: number
+    label: string
+    x: number
+    y: number
+  } | null>(null)
+
+  function startRename(type: 'main' | 'sub' | 'topic', id: number, currentLabel: string, x: number, y: number): void {
+    setRenameTarget({ type, id, label: currentLabel, x, y })
+  }
+
+  async function saveRename(newLabel: string): Promise<void> {
+    if (!renameTarget || !newLabel.trim()) { setRenameTarget(null); return }
+    if (renameTarget.type === 'main') await window.api.renameMainCategory(renameTarget.id, newLabel)
+    else if (renameTarget.type === 'sub') await window.api.renameSubCategory(renameTarget.id, newLabel)
+    else await window.api.updateTopicLabel(renameTarget.id, newLabel)
+    setRenameTarget(null)
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    queryClient.invalidateQueries({ queryKey: ['topics'] })
+  }
+
+  // ─── Drag and drop ───────────────────────────────────────────────────────────
+
+  const dragRef = useRef<{ type: 'topic' | 'subcategory'; id: number } | null>(null)
+
+  function handleTopicDragStart(e: React.DragEvent, topicId: number): void {
+    dragRef.current = { type: 'topic', id: topicId }
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function handleSubDragStart(e: React.DragEvent, subCategoryId: number): void {
+    dragRef.current = { type: 'subcategory', id: subCategoryId }
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function handleDragOver(e: React.DragEvent): void {
+    e.preventDefault()
+  }
+
+  async function handleDropOnSub(e: React.DragEvent, targetSubCategoryId: number): Promise<void> {
+    e.preventDefault()
+    const drag = dragRef.current
+    if (!drag) return
+    if (drag.type === 'topic') {
+      await window.api.updateTopicCategory(drag.id, targetSubCategoryId)
+    }
+    dragRef.current = null
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+  }
+
+  async function handleDropOnMain(e: React.DragEvent, targetMainCategoryId: number): Promise<void> {
+    e.preventDefault()
+    const drag = dragRef.current
+    if (!drag || drag.type !== 'subcategory') return
+    await window.api.moveSubCategory(drag.id, targetMainCategoryId)
+    dragRef.current = null
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+  }
+
+  // ─── Context menu ────────────────────────────────────────────────────────────
+
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number; y: number
+    type: 'topic' | 'sub' | 'main'
+    id: number
+    label: string
+    parentMainCategoryId?: number
+  } | null>(null)
+
+  function handleContextMenu(
+    e: React.MouseEvent,
+    type: 'topic' | 'sub' | 'main',
+    id: number,
+    label: string,
+    parentMainCategoryId?: number
+  ): void {
+    e.preventDefault()
+    setCtxMenu({ x: e.clientX, y: e.clientY, type, id, label, parentMainCategoryId })
+  }
+
+  async function handleMoveTopicToSub(subCategoryId: number): Promise<void> {
+    if (!ctxMenu || ctxMenu.type !== 'topic') return
+    await window.api.updateTopicCategory(ctxMenu.id, subCategoryId)
+    setCtxMenu(null)
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+  }
+
+  async function handleMoveTopicToNewSub(): Promise<void> {
+    if (!ctxMenu || ctxMenu.type !== 'topic' || !ctxMenu.parentMainCategoryId) return
+    const { x, y, parentMainCategoryId, id: topicId } = ctxMenu
+    const newSubId = await window.api.createSubCategory('New Sub-category', parentMainCategoryId)
+    await window.api.updateTopicCategory(topicId, newSubId)
+    setCtxMenu(null)
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    startRename('sub', newSubId, 'New Sub-category', x, y)
+  }
+
+  async function handleMoveSubToMain(mainCategoryId: number): Promise<void> {
+    if (!ctxMenu || ctxMenu.type !== 'sub') return
+    await window.api.moveSubCategory(ctxMenu.id, mainCategoryId)
+    setCtxMenu(null)
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+  }
+
+  async function handleMoveSubToNewMain(): Promise<void> {
+    if (!ctxMenu || ctxMenu.type !== 'sub') return
+    const { x, y, id: subId } = ctxMenu
+    const newMainId = await window.api.createMainCategory('New Category')
+    await window.api.moveSubCategory(subId, newMainId)
+    setCtxMenu(null)
+    queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
+    startRename('main', newMainId, 'New Category', x, y)
+  }
+
+  // Dismiss context menu on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setCtxMenu(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Dismiss context menu on click-away
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onMouseDown = (): void => setCtxMenu(null)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [ctxMenu])
+
+  // ─── Brief handler ───────────────────────────────────────────────────────────
+
+  // id convention: positive = topic, negative 1-99999 = -(subCategoryId), -(id+100000) = main cat
+  async function handleBrief(id: number): Promise<void> {
+    if (id >= 0) {
+      const result = await window.api.generateTopicBrief(id)
+      setBriefModal({ topicLabel: `Topic #${id}`, brief: result.brief })
+    } else if (id > -100000) {
+      const subCatId = -id
+      const sc = hierarchy?.mainCategories.flatMap(mc => mc.subCategories).find(s => s.id === subCatId)
+      if (!sc) return
+      const topTopic = sc.topics[0]
+      if (!topTopic) return
+      const result = await window.api.generateTopicBrief(topTopic.id)
+      setBriefModal({ topicLabel: sc.label, brief: result.brief })
+    } else {
+      const mainId = -(id + 100000)
+      const mc = hierarchy?.mainCategories.find(m => m.id === mainId)
+      if (!mc || mc.subCategories.length === 0) return
+      const topTopic = mc.subCategories[0]?.topics[0]
+      if (!topTopic) return
+      const result = await window.api.generateTopicBrief(topTopic.id)
+      setBriefModal({ topicLabel: mc.label, brief: result.brief })
+    }
+  }
+
+  // ─── Run clustering ──────────────────────────────────────────────────────────
 
   async function handleRun(): Promise<void> {
     setRunning(true)
@@ -36,6 +215,7 @@ export function TopicsView(): JSX.Element {
     try {
       const result = await window.api.runTopicClustering()
       await queryClient.invalidateQueries({ queryKey: ['topics'] })
+      await queryClient.invalidateQueries({ queryKey: ['categories', 'hierarchy'] })
       setRunMsg(`${result.count} clusters found`)
       setTimeout(() => setRunMsg(''), 4000)
     } finally {
@@ -50,6 +230,8 @@ export function TopicsView(): JSX.Element {
       </div>
     )
   }
+
+  const hasData = hierarchy && (hierarchy.mainCategories.length > 0 || hierarchy.uncategorised.length > 0)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -77,7 +259,7 @@ export function TopicsView(): JSX.Element {
             disabled={running}
             className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded transition-colors font-medium"
           >
-            {running ? 'Clustering…' : 'Run Clustering'}
+            {running ? 'Clustering...' : 'Run Clustering'}
           </button>
         </div>
       </div>
@@ -86,12 +268,11 @@ export function TopicsView(): JSX.Element {
       <div className="flex-1 overflow-auto bg-white">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-gray-400 text-xs">
-            Loading…
+            Loading...
           </div>
-        ) : topics.length === 0 ? (
+        ) : !hasData ? (
           <div className="flex flex-col items-center justify-center h-48 gap-3 text-gray-400 text-sm">
-            <span className="text-2xl">🗂</span>
-            <span>No clusters yet.</span>
+            <span className="text-2xl">No clusters yet.</span>
             <span className="text-xs text-gray-300">
               Run clustering after your keywords have finished processing.
             </span>
@@ -99,192 +280,151 @@ export function TopicsView(): JSX.Element {
         ) : (
           <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-2.5 text-left text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 w-44">
-                  Topic Label
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs text-gray-500 font-medium sticky top-0 bg-gray-50">
-                  Keywords
-                </th>
-                <th className="px-4 py-2.5 text-right text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 w-44">
-                  Est. Monthly Traffic
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 w-48">
-                  Most Shown
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs text-gray-500 font-medium sticky top-0 bg-gray-50 w-48">
-                  Highest Ranking
-                </th>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="pl-3 pr-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Topic / Category</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Est. Traffic/mo</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Keywords</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Most Shown</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Highest Rank</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Brief</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Report</th>
               </tr>
             </thead>
             <tbody>
-              {topics.map((topic) => (
-                <TopicRow
-                  key={topic.id}
-                  topic={topic}
-                  onLabelChange={() => queryClient.invalidateQueries({ queryKey: ['topics'] })}
-                  onBriefReady={(brief) => setBriefModal({ topicLabel: topic.label, brief })}
+              {hierarchy?.mainCategories.map(mc => (
+                <CategoryRow
+                  key={mc.id}
+                  category={mc}
+                  expandedSubs={expandedSubs}
+                  onToggleSub={toggleSub}
+                  onToggleAll={toggleAllInMain}
+                  onBrief={handleBrief}
+                  onReportMain={async (id) => { await window.api.generateReportForMain(id) }}
+                  onReportSub={async (id) => { await window.api.generateReportForSub(id) }}
+                  onRenameMain={(id, label, x, y) => startRename('main', id, label, x, y)}
+                  onRenameSub={(id, label, x, y) => startRename('sub', id, label, x, y)}
+                  onRenameTopic={(id, label, x, y) => startRename('topic', id, label, x, y)}
+                  onTopicDragStart={handleTopicDragStart}
+                  onTopicContextMenu={(e, id, label, parentMainId) => handleContextMenu(e, 'topic', id, label, parentMainId)}
+                  onSubContextMenu={(e, id, label) => handleContextMenu(e, 'sub', id, label)}
+                  onMainContextMenu={(e, id, label) => handleContextMenu(e, 'main', id, label)}
+                  onSubDragStart={handleSubDragStart}
+                  onDragOver={handleDragOver}
+                  onDropOnSub={handleDropOnSub}
+                  onDropOnMain={handleDropOnMain}
                 />
               ))}
+
+              {/* Uncategorised bucket */}
+              {(hierarchy?.uncategorised.length ?? 0) > 0 && (
+                <>
+                  <tr className="border-b-2 border-gray-400" style={{ background: '#374151' }}>
+                    <td colSpan={7} className="pl-3 py-2 text-sm font-bold text-white">
+                      <button onClick={() => toggleSub(-1)} className="mr-2 text-xs text-gray-300">
+                        {expandedSubs.has(-1) ? '\u25BC' : '\u25B6'}
+                      </button>
+                      Uncategorised
+                      <span className="ml-2 text-xs font-normal text-gray-400">
+                        {hierarchy!.uncategorised.length} topic{hierarchy!.uncategorised.length !== 1 ? 's' : ''}
+                      </span>
+                    </td>
+                  </tr>
+                  {expandedSubs.has(-1) && hierarchy!.uncategorised.map(topic => (
+                    <TopicRow
+                      key={topic.id}
+                      topic={topic}
+                      onBrief={handleBrief}
+                      onRename={(id, label, x, y) => startRename('topic', id, label, x, y)}
+                      onDragStart={handleTopicDragStart}
+                      onContextMenu={(e, id, label) => handleContextMenu(e, 'topic', id, label, undefined)}
+                      parentMainCategoryId={-1}
+                    />
+                  ))}
+                </>
+              )}
             </tbody>
           </table>
         )}
       </div>
-    </div>
-  )
-}
 
-// ─── Topic row ────────────────────────────────────────────────────────────────
-
-function TopicRow({
-  topic,
-  onLabelChange,
-  onBriefReady
-}: {
-  topic: TopicRow
-  onLabelChange: () => void
-  onBriefReady: (brief: ContentBrief) => void
-}): JSX.Element {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(topic.label)
-  const [generatingBrief, setGeneratingBrief] = useState(false)
-  const [briefError, setBriefError] = useState('')
-
-  const { data: keywords = [] } = useQuery({
-    queryKey: ['topics', topic.id, 'keywords'],
-    queryFn: () => window.api.getTopicKeywords(topic.id)
-  })
-
-  useEffect(() => {
-    if (!editing) setDraft(topic.label)
-  }, [topic.label, editing])
-
-  async function save(): Promise<void> {
-    setEditing(false)
-    const trimmed = draft.trim()
-    if (!trimmed || trimmed === topic.label) return
-    await window.api.updateTopicLabel(topic.id, trimmed)
-    onLabelChange()
-  }
-
-  async function handleGenerateBrief(): Promise<void> {
-    setGeneratingBrief(true)
-    setBriefError('')
-    try {
-      const { brief } = await window.api.generateTopicBrief(topic.id)
-      onBriefReady(brief)
-    } catch (err) {
-      setBriefError(String(err).replace('Error: ', '').slice(0, 80))
-      setTimeout(() => setBriefError(''), 5000)
-    } finally {
-      setGeneratingBrief(false)
-    }
-  }
-
-  return (
-    <tr className="border-b border-gray-100 align-top hover:bg-gray-50 transition-colors">
-      {/* Label */}
-      <td className="px-4 py-3">
-        {editing ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={save}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') save()
-              if (e.key === 'Escape') { setDraft(topic.label); setEditing(false) }
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full px-2 py-1 text-xs border border-blue-400 rounded outline-none text-gray-900 bg-white"
-          />
-        ) : (
-          <div className="flex items-start gap-2 group">
-            <span className="text-xs font-medium text-gray-800">{topic.label}</span>
-            <button
-              onClick={() => setEditing(true)}
-              className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-gray-500 text-xs transition-opacity shrink-0 mt-px"
-              title="Edit label"
-            >
-              ✎
-            </button>
-          </div>
-        )}
-        <div className="text-xs text-gray-400 mt-1">{topic.memberCount} keywords</div>
-        <button
-          onClick={handleGenerateBrief}
-          disabled={generatingBrief}
-          className="mt-2 px-2 py-1 text-xs bg-gray-100 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40 text-gray-500 rounded border border-gray-200 hover:border-blue-200 transition-colors"
-          title="Generate content brief with Gemini"
+      {/* Context menu -- dismissed on click-away (document mousedown) or Escape */}
+      {ctxMenu && (
+        <div
+          className="fixed z-50 bg-white border border-gray-200 rounded shadow-lg py-1 text-sm min-w-[180px]"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onMouseDown={e => e.stopPropagation()}
         >
-          {generatingBrief ? 'Generating…' : '✦ Export Brief'}
-        </button>
-        {briefError && (
-          <div className="text-xs text-red-500 mt-1 break-all">{briefError}</div>
-        )}
-      </td>
-
-      {/* Keywords — vertical list with volume + intent */}
-      <td className="px-4 py-3">
-        <div className="flex flex-col gap-1.5">
-          {keywords.map((kw: TopicKeywordRow) => (
-            <div key={kw.id} className="flex items-center gap-2">
-              <span className="text-xs text-gray-700 font-mono">{kw.keyword}</span>
-              {kw.searchVolume != null && (
-                <span className="text-xs text-gray-400 tabular-nums shrink-0">
-                  {kw.searchVolume.toLocaleString()}/mo
-                </span>
-              )}
-              {kw.searchIntent && (
-                <span className={`text-xs px-1.5 py-0.5 rounded capitalize shrink-0 ${INTENT_COLORS[kw.searchIntent] ?? 'bg-gray-100 text-gray-600'}`}>
-                  {kw.searchIntent}
-                </span>
-              )}
-            </div>
-          ))}
+          <button
+            onClick={() => { startRename(ctxMenu.type, ctxMenu.id, ctxMenu.label, ctxMenu.x, ctxMenu.y); setCtxMenu(null) }}
+            className="w-full text-left px-3 py-1.5 hover:bg-gray-100"
+          >
+            Rename
+          </button>
+          {ctxMenu.type === 'topic' && (
+            <>
+              <div className="px-3 py-1 text-xs text-gray-400 font-semibold uppercase tracking-wide border-t mt-1 pt-1">Move to sub-category</div>
+              {hierarchy?.mainCategories.flatMap(mc => mc.subCategories).map(sc => (
+                <button
+                  key={sc.id}
+                  onClick={() => handleMoveTopicToSub(sc.id)}
+                  className="w-full text-left px-3 py-1.5 hover:bg-gray-100"
+                >
+                  {sc.label}
+                </button>
+              ))}
+              <button
+                onClick={handleMoveTopicToNewSub}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 text-blue-600"
+              >
+                + New sub-category...
+              </button>
+            </>
+          )}
+          {ctxMenu.type === 'sub' && (
+            <>
+              <div className="px-3 py-1 text-xs text-gray-400 font-semibold uppercase tracking-wide border-t mt-1 pt-1">Move to main category</div>
+              {hierarchy?.mainCategories.map(mc => (
+                <button
+                  key={mc.id}
+                  onClick={() => handleMoveSubToMain(mc.id)}
+                  className="w-full text-left px-3 py-1.5 hover:bg-gray-100"
+                >
+                  {mc.label}
+                </button>
+              ))}
+              <button
+                onClick={handleMoveSubToNewMain}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 text-blue-600"
+              >
+                + New main category...
+              </button>
+            </>
+          )}
         </div>
-      </td>
+      )}
 
-      {/* Est. Monthly Traffic */}
-      <td className="px-4 py-3 text-right tabular-nums">
-        {topic.totalSearchVolume != null
-          ? <span className="text-xs text-gray-700">{topic.totalSearchVolume.toLocaleString()}</span>
-          : <span className="text-xs text-gray-300">—</span>
-        }
-      </td>
-
-      {/* Most shown domain */}
-      <td className="px-4 py-3">
-        {topic.topDomain ? (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-800 font-mono truncate max-w-36" title={topic.topDomain}>
-              {topic.topDomain}
-            </span>
-            <span className="shrink-0 text-xs text-gray-400 tabular-nums">
-              ×{topic.topDomainCount}
-            </span>
+      {/* Inline rename overlay -- positioned near the clicked label */}
+      {renameTarget && (
+        <div className="fixed inset-0 z-40" onClick={() => setRenameTarget(null)}>
+          <div
+            className="absolute bg-white border border-blue-400 rounded shadow-lg p-2"
+            style={{ left: renameTarget.x, top: renameTarget.y + 4 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <input
+              autoFocus
+              defaultValue={renameTarget.label}
+              className="border border-gray-300 rounded px-2 py-1 text-sm w-48"
+              onKeyDown={e => {
+                if (e.key === 'Enter') saveRename((e.target as HTMLInputElement).value)
+                if (e.key === 'Escape') setRenameTarget(null)
+              }}
+            />
+            <div className="text-xs text-gray-400 mt-1">Enter to save - Esc to cancel</div>
           </div>
-        ) : (
-          <span className="text-gray-300 text-xs">—</span>
-        )}
-      </td>
-
-      {/* Highest ranking domain */}
-      <td className="px-4 py-3">
-        {topic.bestDomain ? (
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-600 text-white text-xs font-bold shrink-0">
-              {topic.bestDomainPosition}
-            </span>
-            <span className="text-xs text-gray-800 font-mono truncate max-w-32" title={topic.bestDomain}>
-              {topic.bestDomain}
-            </span>
-          </div>
-        ) : (
-          <span className="text-gray-300 text-xs">—</span>
-        )}
-      </td>
-    </tr>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -318,7 +458,7 @@ function BriefModal({
             onClick={onClose}
             className="text-gray-300 hover:text-gray-600 text-xl leading-none mt-0.5 transition-colors"
           >
-            ×
+            x
           </button>
         </div>
 
@@ -343,7 +483,7 @@ function BriefModal({
               <ul className="space-y-1">
                 {brief.keyTopics.map((t, i) => (
                   <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
-                    <span className="text-blue-400 mt-0.5 shrink-0">•</span>
+                    <span className="text-blue-400 mt-0.5 shrink-0">&bull;</span>
                     {t}
                   </li>
                 ))}
@@ -366,7 +506,7 @@ function BriefModal({
                       <ul className="px-4 py-2.5 space-y-1">
                         {section.keyPoints.map((pt, j) => (
                           <li key={j} className="flex items-start gap-2 text-xs text-gray-600">
-                            <span className="text-gray-300 shrink-0 mt-0.5">–</span>
+                            <span className="text-gray-300 shrink-0 mt-0.5">&ndash;</span>
                             {pt}
                           </li>
                         ))}
