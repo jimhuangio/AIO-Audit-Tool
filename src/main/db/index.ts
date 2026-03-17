@@ -759,6 +759,51 @@ export function clearTopics(): void {
   `)
 }
 
+export interface CategoryHierarchyInput {
+  mainCategories: {
+    label: string
+    subCategories: {
+      label: string
+      topicIds: number[]
+    }[]
+  }[]
+}
+
+export function clearAndInsertCategories(hierarchy: CategoryHierarchyInput): void {
+  const db = getDB()
+  const tx = db.transaction(() => {
+    // FK-safe reset
+    db.exec('UPDATE topics SET sub_category_id = NULL')
+    db.exec('DELETE FROM sub_categories')
+    db.exec('DELETE FROM main_categories')
+
+    const insertMain = db.prepare(
+      `INSERT INTO main_categories (label, position) VALUES (?, ?)`
+    )
+    const insertSub = db.prepare(
+      `INSERT INTO sub_categories (main_category_id, label, position) VALUES (?, ?, ?)`
+    )
+    const assignTopic = db.prepare(
+      `UPDATE topics SET sub_category_id = ? WHERE id = ?`
+    )
+
+    hierarchy.mainCategories.forEach((mc, mcPos) => {
+      const mcRow = insertMain.run(mc.label, mcPos)
+      const mcId = Number(mcRow.lastInsertRowid)
+
+      mc.subCategories.forEach((sc, scPos) => {
+        const scRow = insertSub.run(mcId, sc.label, scPos)
+        const scId = Number(scRow.lastInsertRowid)
+
+        for (const topicId of sc.topicIds) {
+          assignTopic.run(scId, topicId)
+        }
+      })
+    })
+  })
+  tx()
+}
+
 // Wipes all research data for a fresh session.
 // Preserves the `project` and `_meta` tables (settings + schema version).
 // ─── Keyword enrichment (search volume + intent) ──────────────────────────────
@@ -895,6 +940,80 @@ export function getTopics(): TopicRow[] {
   ).all() as TopicRow[]
 }
 
+export interface FlatHierarchyRow {
+  topicId: number
+  topicLabel: string
+  subCategoryId: number | null
+  subCategoryLabel: string | null
+  subCategoryPosition: number | null
+  mainCategoryId: number | null
+  mainCategoryLabel: string | null
+  mainCategoryPosition: number | null
+  memberCount: number
+  avgSimilarity: number
+  topKeywords: string | null
+  topDomain: string | null
+  topDomainCount: number | null
+  bestDomain: string | null
+  bestDomainPosition: number | null
+  totalSearchVolume: number | null
+}
+
+export function getFullHierarchy(): FlatHierarchyRow[] {
+  // Reuse the domain-stats CTE from getTopics(), adding category joins.
+  return getDB().prepare(
+    `WITH domain_agg AS (
+       SELECT tk.topic_id,
+              a.domain_root,
+              COUNT(*)         AS cnt,
+              MIN(a.position)  AS best_pos
+       FROM aio_sources a
+       JOIN topic_keywords tk ON tk.keyword_id = a.keyword_id
+       WHERE a.domain_root != '' AND a.position BETWEEN 1 AND 10
+       GROUP BY tk.topic_id, a.domain_root
+     ),
+     ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY cnt DESC)      AS rn_cnt,
+              ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY best_pos ASC)  AS rn_pos
+       FROM domain_agg
+     )
+     SELECT
+       t.id                          AS topicId,
+       t.label                       AS topicLabel,
+       sc.id                         AS subCategoryId,
+       sc.label                      AS subCategoryLabel,
+       sc.position                   AS subCategoryPosition,
+       mc.id                         AS mainCategoryId,
+       mc.label                      AS mainCategoryLabel,
+       mc.position                   AS mainCategoryPosition,
+       COUNT(tk.keyword_id)          AS memberCount,
+       ROUND(AVG(tk.similarity), 2)  AS avgSimilarity,
+       (SELECT GROUP_CONCAT(sub.keyword, '|')
+        FROM (SELECT k2.keyword
+              FROM topic_keywords tk2
+              JOIN keywords k2 ON k2.id = tk2.keyword_id
+              WHERE tk2.topic_id = t.id
+              ORDER BY tk2.similarity DESC
+              LIMIT 5) sub
+       )                             AS topKeywords,
+       td.domain_root                AS topDomain,
+       td.cnt                        AS topDomainCount,
+       bd.domain_root                AS bestDomain,
+       bd.best_pos                   AS bestDomainPosition,
+       SUM(k.search_volume)          AS totalSearchVolume
+     FROM topics t
+     LEFT JOIN sub_categories sc ON sc.id = t.sub_category_id
+     LEFT JOIN main_categories mc ON mc.id = sc.main_category_id
+     LEFT JOIN topic_keywords tk ON tk.topic_id = t.id
+     LEFT JOIN keywords k ON k.id = tk.keyword_id
+     LEFT JOIN ranked td ON td.topic_id = t.id AND td.rn_cnt = 1
+     LEFT JOIN ranked bd ON bd.topic_id = t.id AND bd.rn_pos = 1
+     GROUP BY t.id
+     ORDER BY mc.position ASC, sc.position ASC, memberCount DESC`
+  ).all() as FlatHierarchyRow[]
+}
+
 export function getTopicKeywords(topicId: number): TopicKeywordRow[] {
   return getDB().prepare(
     `SELECT k.id, k.keyword, tk.similarity, k.depth,
@@ -912,6 +1031,54 @@ export function getTopicKeywords(topicId: number): TopicKeywordRow[] {
 
 export function updateTopicLabel(topicId: number, label: string): void {
   getDB().prepare(`UPDATE topics SET label = ? WHERE id = ?`).run(label, topicId)
+}
+
+export function updateTopicCategory(topicId: number, subCategoryId: number): void {
+  getDB().prepare(`UPDATE topics SET sub_category_id = ? WHERE id = ?`).run(subCategoryId, topicId)
+}
+
+export function moveSubCategory(subCategoryId: number, mainCategoryId: number): void {
+  getDB().prepare(`UPDATE sub_categories SET main_category_id = ? WHERE id = ?`).run(mainCategoryId, subCategoryId)
+}
+
+export function renameMainCategory(id: number, label: string): void {
+  getDB().prepare(`UPDATE main_categories SET label = ? WHERE id = ?`).run(label, id)
+}
+
+export function renameSubCategory(id: number, label: string): void {
+  getDB().prepare(`UPDATE sub_categories SET label = ? WHERE id = ?`).run(label, id)
+}
+
+export function reorderCategories(
+  updates: { id: number; level: 'main' | 'sub'; position: number }[]
+): void {
+  const updateMain = getDB().prepare(`UPDATE main_categories SET position = ? WHERE id = ?`)
+  const updateSub  = getDB().prepare(`UPDATE sub_categories  SET position = ? WHERE id = ?`)
+  const tx = getDB().transaction(() => {
+    for (const u of updates) {
+      if (u.level === 'main') updateMain.run(u.position, u.id)
+      else updateSub.run(u.position, u.id)
+    }
+  })
+  tx()
+}
+
+export function createMainCategory(label: string): number {
+  const db = getDB()
+  const maxPos = (db.prepare(`SELECT MAX(position) AS p FROM main_categories`).get() as any)?.p ?? -1
+  const row = db.prepare(`INSERT INTO main_categories (label, position) VALUES (?, ?)`).run(label, maxPos + 1)
+  return Number(row.lastInsertRowid)
+}
+
+export function createSubCategory(label: string, mainCategoryId: number): number {
+  const db = getDB()
+  const maxPos = (db.prepare(
+    `SELECT MAX(position) AS p FROM sub_categories WHERE main_category_id = ?`
+  ).get(mainCategoryId) as any)?.p ?? -1
+  const row = db.prepare(
+    `INSERT INTO sub_categories (main_category_id, label, position) VALUES (?, ?, ?)`
+  ).run(mainCategoryId, label, maxPos + 1)
+  return Number(row.lastInsertRowid)
 }
 
 // Returns schema @type → page count for all crawled AIO-source pages tied to a topic.
