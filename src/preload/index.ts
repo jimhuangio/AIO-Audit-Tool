@@ -13,7 +13,8 @@ import type {
   SnippetMatchRow,
   TopicRow,
   TopicKeywordRow,
-  ContentBrief
+  ContentBrief,
+  CategoryHierarchy
 } from '../types'
 
 const api = {
@@ -194,6 +195,37 @@ const api = {
 
   generateTopicBrief: (topicId: number): Promise<{ brief: ContentBrief; filePath: string }> =>
     ipcRenderer.invoke('topics:generateBrief', topicId),
+
+  // ─── Categories ───────────────────────────────────────────────────────────────
+  getCategoryHierarchy: (): Promise<CategoryHierarchy> =>
+    ipcRenderer.invoke('categories:getHierarchy'),
+
+  updateTopicCategory: (topicId: number, subCategoryId: number): Promise<void> =>
+    ipcRenderer.invoke('categories:updateTopicCategory', topicId, subCategoryId),
+
+  moveSubCategory: (subCategoryId: number, mainCategoryId: number): Promise<void> =>
+    ipcRenderer.invoke('categories:moveSubCategory', subCategoryId, mainCategoryId),
+
+  renameMainCategory: (id: number, label: string): Promise<void> =>
+    ipcRenderer.invoke('categories:renameMain', id, label),
+
+  renameSubCategory: (id: number, label: string): Promise<void> =>
+    ipcRenderer.invoke('categories:renameSub', id, label),
+
+  reorderCategories: (updates: { id: number; level: 'main' | 'sub'; position: number }[]): Promise<void> =>
+    ipcRenderer.invoke('categories:reorder', updates),
+
+  createMainCategory: (label: string): Promise<number> =>
+    ipcRenderer.invoke('categories:createMain', label),
+
+  createSubCategory: (label: string, mainCategoryId: number): Promise<number> =>
+    ipcRenderer.invoke('categories:createSub', label, mainCategoryId),
+
+  generateReportForMain: (mainCategoryId: number): Promise<{ filePath: string }> =>
+    ipcRenderer.invoke('report:generateForMain', mainCategoryId),
+
+  generateReportForSub: (subCategoryId: number): Promise<{ filePath: string }> =>
+    ipcRenderer.invoke('report:generateForSub', subCategoryId),
 
   runEnrichment: (): Promise<{ done: number }> =>
     ipcRenderer.invoke('run:enrich'),

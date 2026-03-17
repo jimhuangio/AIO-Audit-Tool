@@ -37,8 +37,16 @@ import {
   getTopicAIOSnippets,
   getTopicElementBreakdown,
   getTopicSchemaCounts,
+  getFullHierarchy,
+  updateTopicCategory,
+  moveSubCategory,
+  renameMainCategory,
+  renameSubCategory,
+  reorderCategories,
+  createMainCategory,
+  createSubCategory,
 } from '../db'
-import { runClustering } from '../topics/run'
+import { runClustering, runCategorisation } from '../topics/run'
 import { runEnrichment } from '../fanout/enrich'
 import { testGeminiKey, generateContentBrief } from '../gemini/client'
 import { firecrawlTestKey } from '../crawler/firecrawl-client'
@@ -392,6 +400,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const clusters = await runClustering(inputs)
     clearTopics()
     insertTopics(clusters)
+    // Auto-categorise after clustering — fires async, no await needed in IPC handler
+    // because categorisation is best-effort and we don't want to block the UI response.
+    // When done, it fires topics:updated so the renderer refreshes the hierarchy.
+    runCategorisation().then(() => {
+      const win = getWindow()
+      if (win && !win.isDestroyed()) win.webContents.send('topics:updated')
+    }).catch(() => {
+      // categorisation is non-critical — still notify renderer to refresh topics
+      const win = getWindow()
+      if (win && !win.isDestroyed()) win.webContents.send('topics:updated')
+    })
     return { count: clusters.length }
   })
 
@@ -411,6 +430,95 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('topics:updateLabel', (_e, topicId: number, label: string) => {
     updateTopicLabel(topicId, label)
+  })
+
+  // ─── Categories ───────────────────────────────────────────────────────────────
+
+  ipcMain.handle('categories:getHierarchy', () => {
+    const rows = getFullHierarchy()
+
+    // Group flat rows into nested CategoryHierarchy
+    const mainMap = new Map<number, {
+      id: number; label: string; position: number; totalSearchVolume: number
+      subCategories: Map<number, {
+        id: number; mainCategoryId: number; label: string; position: number; totalSearchVolume: number
+        topics: typeof rows
+      }>
+    }>()
+
+    const uncategorised: typeof rows = []
+
+    for (const row of rows) {
+      if (row.mainCategoryId === null || row.subCategoryId === null) {
+        uncategorised.push(row)
+        continue
+      }
+
+      if (!mainMap.has(row.mainCategoryId)) {
+        mainMap.set(row.mainCategoryId, {
+          id: row.mainCategoryId,
+          label: row.mainCategoryLabel!,
+          position: row.mainCategoryPosition!,
+          totalSearchVolume: 0,
+          subCategories: new Map()
+        })
+      }
+      const mc = mainMap.get(row.mainCategoryId)!
+
+      if (!mc.subCategories.has(row.subCategoryId)) {
+        mc.subCategories.set(row.subCategoryId, {
+          id: row.subCategoryId,
+          mainCategoryId: row.mainCategoryId,
+          label: row.subCategoryLabel!,
+          position: row.subCategoryPosition!,
+          totalSearchVolume: 0,
+          topics: []
+        })
+      }
+      const sc = mc.subCategories.get(row.subCategoryId)!
+      sc.topics.push(row)
+      sc.totalSearchVolume += row.totalSearchVolume ?? 0
+      mc.totalSearchVolume += row.totalSearchVolume ?? 0
+    }
+
+    return {
+      mainCategories: Array.from(mainMap.values())
+        .sort((a, b) => a.position - b.position)
+        .map(mc => ({
+          ...mc,
+          subCategories: Array.from(mc.subCategories.values())
+            .sort((a, b) => a.position - b.position)
+        })),
+      uncategorised
+    }
+  })
+
+  ipcMain.handle('categories:updateTopicCategory', (_e, topicId: number, subCategoryId: number) => {
+    updateTopicCategory(topicId, subCategoryId)
+  })
+
+  ipcMain.handle('categories:moveSubCategory', (_e, subCategoryId: number, mainCategoryId: number) => {
+    moveSubCategory(subCategoryId, mainCategoryId)
+  })
+
+  ipcMain.handle('categories:renameMain', (_e, id: number, label: string) => {
+    renameMainCategory(id, label)
+  })
+
+  ipcMain.handle('categories:renameSub', (_e, id: number, label: string) => {
+    renameSubCategory(id, label)
+  })
+
+  ipcMain.handle('categories:reorder', (_e, updates: { id: number; level: 'main' | 'sub'; position: number }[]) => {
+    reorderCategories(updates)
+  })
+
+  ipcMain.handle('categories:createMain', (_e, label: string) => {
+    return createMainCategory(label)
+  })
+
+  ipcMain.handle('categories:createSub', (_e, label: string, mainCategoryId: number) => {
+    return createSubCategory(label, mainCategoryId)
   })
 
   // ─── Re-enrich on demand ──────────────────────────────────────────────────
@@ -490,6 +598,84 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     const filePath = resolveExportPath(
       `${meta.name.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
+      'fanout-report-'
+    )
+    writeFileSync(filePath, html, 'utf8')
+    await shell.openPath(filePath)
+    return { filePath }
+  })
+
+  ipcMain.handle('report:generateForMain', async (_e, mainCategoryId: number) => {
+    const meta   = getProjectMeta()
+    const stats  = getProjectStats()
+    const pivot  = getAIODomainPivot(false)
+    const allTopics = getTopics()
+
+    // Get sub-category IDs for this main category, then filter topics
+    const subCatIds = getDB()
+      .prepare(`SELECT id FROM sub_categories WHERE main_category_id = ?`)
+      .all(mainCategoryId)
+      .map((r: any) => r.id as number)
+
+    const topicIds = subCatIds.length > 0
+      ? getDB()
+          .prepare(`SELECT id FROM topics WHERE sub_category_id IN (${subCatIds.map(() => '?').join(',')})`)
+          .all(...subCatIds)
+          .map((r: any) => r.id as number)
+      : []
+
+    const filteredTopics = allTopics.filter(t => topicIds.includes(t.id))
+
+    const mainLabel = getDB()
+      .prepare(`SELECT label FROM main_categories WHERE id = ?`)
+      .get(mainCategoryId) as { label: string } | undefined
+
+    const topicData = filteredTopics.map(topic => ({
+      topic,
+      keywords: getTopicKeywords(topic.id),
+      elements: getTopicElementBreakdown(topic.id),
+      schemas: getTopicSchemaCounts(topic.id)
+    }))
+
+    const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
+    const label = mainLabel?.label ?? `Category_${mainCategoryId}`
+    const filePath = resolveExportPath(
+      `${label.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
+      'fanout-report-'
+    )
+    writeFileSync(filePath, html, 'utf8')
+    await shell.openPath(filePath)
+    return { filePath }
+  })
+
+  ipcMain.handle('report:generateForSub', async (_e, subCategoryId: number) => {
+    const meta   = getProjectMeta()
+    const stats  = getProjectStats()
+    const pivot  = getAIODomainPivot(false)
+    const allTopics = getTopics()
+
+    const topicIds = getDB()
+      .prepare(`SELECT id FROM topics WHERE sub_category_id = ?`)
+      .all(subCategoryId)
+      .map((r: any) => r.id as number)
+
+    const filteredTopics = allTopics.filter(t => topicIds.includes(t.id))
+
+    const subLabel = getDB()
+      .prepare(`SELECT label FROM sub_categories WHERE id = ?`)
+      .get(subCategoryId) as { label: string } | undefined
+
+    const topicData = filteredTopics.map(topic => ({
+      topic,
+      keywords: getTopicKeywords(topic.id),
+      elements: getTopicElementBreakdown(topic.id),
+      schemas: getTopicSchemaCounts(topic.id)
+    }))
+
+    const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
+    const label = subLabel?.label ?? `SubCategory_${subCategoryId}`
+    const filePath = resolveExportPath(
+      `${label.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
       'fanout-report-'
     )
     writeFileSync(filePath, html, 'utf8')
