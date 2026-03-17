@@ -140,6 +140,10 @@ crawled_pages (1)
 aio_sources (1)
   └── snippet_matches (N)   ← aio_source → best page_section
 
+main_categories (1)
+  └── sub_categories (N)    ← two-level category hierarchy
+        └── topics (N)      ← sub_category_id FK
+
 topics (1)
   └── topic_keywords (N)    ← keyword cluster membership
 ```
@@ -159,14 +163,32 @@ See the full schema in `src/main/db/schema.ts`. Summary:
 | `crawled_pages` | ≤ unique URLs | url, status_code, title, schema_types |
 | `page_sections` | 50–500× pages | section_type, content, position_idx |
 | `snippet_matches` | ≤3× aio_sources | match_score, match_method |
-| `topics` | 5–50 | label, keywords JSON |
+| `topics` | 5–50 | label, sub_category_id (FK) |
 | `topic_keywords` | = keywords | similarity score |
 | `organic_rankings` | ≤100× keywords | keyword_id, domain_root, domain_full, position (rank_absolute), url |
+| `main_categories` | 3–15 | label, position |
+| `sub_categories` | 5–40 | label, position, main_category_id (FK) |
 
 **Schema v6 additions:**
 ```sql
 ALTER TABLE keywords ADD COLUMN category_id   INTEGER;
 ALTER TABLE keywords ADD COLUMN category_name TEXT;
+```
+
+**Schema v12 additions:**
+```sql
+CREATE TABLE IF NOT EXISTS main_categories (
+  id       INTEGER PRIMARY KEY,
+  label    TEXT    NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sub_categories (
+  id               INTEGER PRIMARY KEY,
+  main_category_id INTEGER NOT NULL REFERENCES main_categories(id),
+  label            TEXT    NOT NULL,
+  position         INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE topics ADD COLUMN sub_category_id INTEGER REFERENCES sub_categories(id);
 ```
 
 **Schema v8–v11 additions:**
@@ -274,17 +296,29 @@ interface FanoutAPI {
   getTopicKeywords(topicId: number): Promise<TopicKeywordRow[]>
   updateTopicLabel(topicId: number, label: string): Promise<void>
 
+  // Category hierarchy (auto-populated by Gemini after every cluster run)
+  getCategoryHierarchy(): Promise<CategoryHierarchy>
+  updateTopicCategory(topicId: number, subCategoryId: number): Promise<void>
+  moveSubCategory(subCategoryId: number, mainCategoryId: number): Promise<void>
+  renameMainCategory(id: number, label: string): Promise<void>
+  renameSubCategory(id: number, label: string): Promise<void>
+  reorderCategories(updates: { id: number; level: 'main' | 'sub'; position: number }[]): Promise<void>
+  createMainCategory(label: string): Promise<number>
+  createSubCategory(label: string, mainCategoryId: number): Promise<number>
+
   // Gemini
   geminiTestKey(apiKey: string): Promise<void>
 
   // Events (main → renderer)
   onRunComplete(cb: () => void): () => void      // run fully finished; reset button + refresh keywords
-  onTopicsUpdated(cb: () => void): () => void    // live recluster during run; refresh topics view
+  onTopicsUpdated(cb: () => void): () => void    // live recluster + recategorise; refresh topics view
 
   // Export
   exportCSV(table: string, useSubdomain: boolean): Promise<string | null>
   exportKeywordsCSV(domains: string[]): Promise<string | null>  // AIO + organic columns per domain
   exportProjectCopy(): Promise<string | null>
+  generateReportForMain(mainCategoryId: number): Promise<{ filePath: string }>  // filtered HTML report
+  generateReportForSub(subCategoryId: number): Promise<{ filePath: string }>    // filtered HTML report
 
   // Global credentials
   getAllCredentials(): Promise<Record<string, Record<string, string>>>
@@ -541,6 +575,43 @@ Jaccard penalises hierarchical terms ("home loan" vs "home loan requirements" �
 **`getClusterableKeywords` query:** Single SQL JOIN with `GROUP_CONCAT(DISTINCT domain_root)` — replaced the prior N+1 pattern (one query per keyword) that blocked the main process on large datasets.
 
 **`getTopics` query:** Uses a CTE to pre-aggregate `(topic_id, domain_root, cnt, best_pos)` once, then applies `ROW_NUMBER() OVER (PARTITION BY topic_id ORDER BY ...)` to select the top/best domain per topic. This replaced four correlated subqueries that each re-scanned `aio_sources` per topic row.
+
+---
+
+## Topics Category Hierarchy
+
+After every clustering run, `runCategorisation()` (in `src/main/topics/run.ts`) is called automatically and asynchronously — the IPC handler returns the cluster count immediately; categorisation fires in the background and broadcasts `topics:updated` when done.
+
+### Categorisation Engine (`src/main/topics/categorize.ts`)
+
+```
+categorizeTopics(topics, apiKey)
+  │
+  ├── POST /v1beta/models/gemini-2.5-pro:generateContent
+  │   prompt: "Group these N topic labels into a two-level hierarchy.
+  │            Return main categories with sub-categories under each.
+  │            Every topic must appear exactly once."
+  │   responseSchema: { mainCategories: [{ label, subCategories: [{ label, topicLabels[] }] }] }
+  │
+  └── Map topicLabels → topic IDs (case-insensitive)
+      → clearAndInsertCategories(hierarchy)  ← single transaction
+```
+
+**Fallback:** Returns `null` on any error (no Gemini key, API failure, parse error). Topics remain with `sub_category_id = NULL` and appear in the Uncategorised bucket.
+
+### DB Write (`clearAndInsertCategories`)
+
+Single transaction — FK-safe order:
+1. `UPDATE topics SET sub_category_id = NULL`
+2. `DELETE FROM sub_categories`
+3. `DELETE FROM main_categories`
+4. `INSERT main_categories` with positions
+5. `INSERT sub_categories` with positions + `main_category_id`
+6. `UPDATE topics SET sub_category_id = ...` for each mapping
+
+### IPC Grouping
+
+`categories:getHierarchy` calls `getFullHierarchy()` (flat CTE JOIN), then groups into a nested `CategoryHierarchy` object in TypeScript using `Map`s — consistent with the existing `getTopics()` pattern.
 
 ---
 

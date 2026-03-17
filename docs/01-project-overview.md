@@ -83,9 +83,15 @@ After the SERP harvest, every keyword is enriched with:
 - Enrichment runs automatically after every fanout and retries up to 3× if any keywords remain unenriched
 - Re-enrich button in the status bar lets you backfill data on-demand without re-running the full fanout
 
-### 7. Topic Clustering
+### 7. Topic Clustering + Category Hierarchy
 - Two backends: **Gemini 2.5 Pro** (semantic, preferred when API key configured) or local algorithm (overlap coefficient + domain Jaccard)
 - Category partitioning ensures keywords in different Google taxonomy categories (e.g. "brain cancer symptoms" vs "lung cancer symptoms") are never merged into one topic
+- After every clustering run, Gemini automatically organises topics into a **two-level hierarchy**: main category → sub-category → topics
+- Topics view renders collapsible rows: navy main-category header → blue sub-category band → white topic rows
+- **Brief** and **HTML Report** buttons available at every level (main category, sub-category, topic)
+- Drag-and-drop rearranging: move topics between sub-categories, move sub-categories between main categories
+- Right-click context menu: rename, move, create new sub-category / main category
+- Uncategorised bucket shows any topics Gemini couldn't classify (or when Gemini key is absent)
 - Per-topic report: **Est. Monthly Traffic** (combined search volume), which domains dominate, highest-ranking domain
 - Topics rebuild live during a run (every 10 keywords) — no need to manually trigger clustering
 - Useful for: "these 340 keywords are all in the 'credit card rewards' cluster; Nerdwallet owns it"

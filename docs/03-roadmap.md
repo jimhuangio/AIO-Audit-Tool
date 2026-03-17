@@ -221,6 +221,29 @@ Timeline (weeks from kickoff)
 
 ---
 
+## Post-Phase 4 — Topics Category Hierarchy ✅
+
+**Goal:** Organise topic clusters into a Gemini-generated two-level hierarchy with drag-and-drop rearranging and scoped HTML reports.
+
+| Task | Owner | Status |
+|------|-------|--------|
+| `main_categories` + `sub_categories` tables + schema v12 migration | Dev | ✅ |
+| `sub_category_id` FK on `topics`; FK-safe teardown in `clearTopics` + `clearProjectData` | Dev | ✅ |
+| `CategoryHierarchy`, `MainCategoryRow`, `SubCategoryRow` TypeScript types | Dev | ✅ |
+| `categorizeTopics()` — Gemini 2.5 Pro JSON-schema call, null fallback | Dev | ✅ |
+| `runCategorisation()` wired into `topics/run.ts` after every clustering run | Dev | ✅ |
+| `getFullHierarchy()` — flat CTE join; TypeScript grouping into nested object | Dev | ✅ |
+| `clearAndInsertCategories()` — single transactional hierarchy write | Dev | ✅ |
+| 9 DB mutation functions (rename, reorder, move, create for both levels) | Dev | ✅ |
+| `categories:*` IPC handlers + `report:generateForMain` + `report:generateForSub` | Dev | ✅ |
+| Preload bridge entries for all 10 new IPC channels | Dev | ✅ |
+| `TopicRow.tsx`, `SubCategoryRow.tsx`, `CategoryRow.tsx` components | Dev | ✅ |
+| `TopicsView.tsx` refactor: hierarchy query, collapse state, DnD, context menu, rename overlay | Dev | ✅ |
+| Uncategorised bucket (dark gray header, collapsible) | Dev | ✅ |
+| `topics:updated` event invalidates both `['topics']` and `['categories', 'hierarchy']` | Dev | ✅ |
+
+---
+
 ## Phase 5 — Polish + Broader Platform (Week 14+)
 
 ### Desktop Polish
