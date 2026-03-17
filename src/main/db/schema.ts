@@ -127,14 +127,6 @@ CREATE TABLE IF NOT EXISTS snippet_matches (
 
 CREATE INDEX IF NOT EXISTS idx_sm_source ON snippet_matches(aio_source_id);
 
-CREATE TABLE IF NOT EXISTS topics (
-  id       INTEGER PRIMARY KEY,
-  label    TEXT NOT NULL,
-  keywords TEXT NOT NULL,
-  centroid TEXT,
-  sub_category_id INTEGER REFERENCES sub_categories(id)
-);
-
 CREATE TABLE IF NOT EXISTS main_categories (
   id       INTEGER PRIMARY KEY,
   label    TEXT    NOT NULL,
@@ -146,6 +138,14 @@ CREATE TABLE IF NOT EXISTS sub_categories (
   main_category_id INTEGER NOT NULL REFERENCES main_categories(id),
   label            TEXT    NOT NULL,
   position         INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id       INTEGER PRIMARY KEY,
+  label    TEXT NOT NULL,
+  keywords TEXT NOT NULL,
+  centroid TEXT,
+  sub_category_id INTEGER REFERENCES sub_categories(id)
 );
 
 CREATE TABLE IF NOT EXISTS topic_keywords (
