@@ -1136,6 +1136,41 @@ export function getTopicAIOSnippets(topicId: number): string[] {
   return rows.map(r => r.aio_snippet)
 }
 
+// ─── Category report helpers ──────────────────────────────────────────────────
+
+export function getTopicIdsForMain(mainCategoryId: number): number[] {
+  const subCatIds = getDB()
+    .prepare(`SELECT id FROM sub_categories WHERE main_category_id = ?`)
+    .all(mainCategoryId)
+    .map((r: any) => r.id as number)
+  if (subCatIds.length === 0) return []
+  return getDB()
+    .prepare(`SELECT id FROM topics WHERE sub_category_id IN (${subCatIds.map(() => '?').join(',')})`)
+    .all(...subCatIds)
+    .map((r: any) => r.id as number)
+}
+
+export function getTopicIdsForSub(subCategoryId: number): number[] {
+  return getDB()
+    .prepare(`SELECT id FROM topics WHERE sub_category_id = ?`)
+    .all(subCategoryId)
+    .map((r: any) => r.id as number)
+}
+
+export function getMainCategoryLabel(id: number): string | undefined {
+  const row = getDB()
+    .prepare(`SELECT label FROM main_categories WHERE id = ?`)
+    .get(id) as { label: string } | undefined
+  return row?.label
+}
+
+export function getSubCategoryLabel(id: number): string | undefined {
+  const row = getDB()
+    .prepare(`SELECT label FROM sub_categories WHERE id = ?`)
+    .get(id) as { label: string } | undefined
+  return row?.label
+}
+
 export function getSnippetMatchesForKeyword(keywordId: number): {
   url: string
   position: number

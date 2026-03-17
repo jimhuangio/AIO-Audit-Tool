@@ -45,6 +45,10 @@ import {
   reorderCategories,
   createMainCategory,
   createSubCategory,
+  getTopicIdsForMain,
+  getTopicIdsForSub,
+  getMainCategoryLabel,
+  getSubCategoryLabel,
 } from '../db'
 import { runClustering, runCategorisation } from '../topics/run'
 import { runEnrichment } from '../fanout/enrich'
@@ -56,6 +60,23 @@ import { mcpClient, DataForSEOClient } from '../mcp/client'
 import { scheduler } from '../fanout/scheduler'
 import { readAllCredentials, saveServiceCredentials, removeServiceCredentials } from '../credentials'
 import type { RunConfig } from '../../types'
+import type { FlatHierarchyRow } from '../db'
+import type { TopicRow } from '../../types'
+
+function flatRowToTopicRow(row: FlatHierarchyRow): TopicRow {
+  return {
+    id: row.topicId,
+    label: row.topicLabel,
+    memberCount: row.memberCount,
+    avgSimilarity: row.avgSimilarity,
+    topKeywords: row.topKeywords,
+    topDomain: row.topDomain,
+    topDomainCount: row.topDomainCount,
+    bestDomain: row.bestDomain,
+    bestDomainPosition: row.bestDomainPosition,
+    totalSearchVolume: row.totalSearchVolume,
+  }
+}
 
 // Resolves an export file path: uses project exportDir if set and writable,
 // otherwise falls back to a temp directory.
@@ -442,15 +463,16 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       id: number; label: string; position: number; totalSearchVolume: number
       subCategories: Map<number, {
         id: number; mainCategoryId: number; label: string; position: number; totalSearchVolume: number
-        topics: typeof rows
+        topDomain: string | null; bestDomain: string | null; bestDomainPosition: number | null
+        topics: import('../../types').TopicRow[]
       }>
     }>()
 
-    const uncategorised: typeof rows = []
+    const uncategorised: import('../../types').TopicRow[] = []
 
     for (const row of rows) {
       if (row.mainCategoryId === null || row.subCategoryId === null) {
-        uncategorised.push(row)
+        uncategorised.push(flatRowToTopicRow(row))
         continue
       }
 
@@ -472,11 +494,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
           label: row.subCategoryLabel!,
           position: row.subCategoryPosition!,
           totalSearchVolume: 0,
+          topDomain: row.topDomain,
+          bestDomain: row.bestDomain,
+          bestDomainPosition: row.bestDomainPosition,
           topics: []
         })
       }
       const sc = mc.subCategories.get(row.subCategoryId)!
-      sc.topics.push(row)
+      sc.topics.push(flatRowToTopicRow(row))
       sc.totalSearchVolume += row.totalSearchVolume ?? 0
       mc.totalSearchVolume += row.totalSearchVolume ?? 0
     }
@@ -611,24 +636,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const pivot  = getAIODomainPivot(false)
     const allTopics = getTopics()
 
-    // Get sub-category IDs for this main category, then filter topics
-    const subCatIds = getDB()
-      .prepare(`SELECT id FROM sub_categories WHERE main_category_id = ?`)
-      .all(mainCategoryId)
-      .map((r: any) => r.id as number)
-
-    const topicIds = subCatIds.length > 0
-      ? getDB()
-          .prepare(`SELECT id FROM topics WHERE sub_category_id IN (${subCatIds.map(() => '?').join(',')})`)
-          .all(...subCatIds)
-          .map((r: any) => r.id as number)
-      : []
-
+    const topicIds = getTopicIdsForMain(mainCategoryId)
     const filteredTopics = allTopics.filter(t => topicIds.includes(t.id))
-
-    const mainLabel = getDB()
-      .prepare(`SELECT label FROM main_categories WHERE id = ?`)
-      .get(mainCategoryId) as { label: string } | undefined
+    const label = getMainCategoryLabel(mainCategoryId) ?? `Category_${mainCategoryId}`
 
     const topicData = filteredTopics.map(topic => ({
       topic,
@@ -638,7 +648,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     }))
 
     const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
-    const label = mainLabel?.label ?? `Category_${mainCategoryId}`
     const filePath = resolveExportPath(
       `${label.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
       'fanout-report-'
@@ -654,16 +663,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const pivot  = getAIODomainPivot(false)
     const allTopics = getTopics()
 
-    const topicIds = getDB()
-      .prepare(`SELECT id FROM topics WHERE sub_category_id = ?`)
-      .all(subCategoryId)
-      .map((r: any) => r.id as number)
-
+    const topicIds = getTopicIdsForSub(subCategoryId)
     const filteredTopics = allTopics.filter(t => topicIds.includes(t.id))
-
-    const subLabel = getDB()
-      .prepare(`SELECT label FROM sub_categories WHERE id = ?`)
-      .get(subCategoryId) as { label: string } | undefined
+    const label = getSubCategoryLabel(subCategoryId) ?? `SubCategory_${subCategoryId}`
 
     const topicData = filteredTopics.map(topic => ({
       topic,
@@ -673,7 +675,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     }))
 
     const html = buildReportHTML({ meta, stats, pivot, topics: topicData, generatedAt: Date.now() })
-    const label = subLabel?.label ?? `SubCategory_${subCategoryId}`
     const filePath = resolveExportPath(
       `${label.replace(/[^a-z0-9]/gi, '_')}_AIO_Report.html`,
       'fanout-report-'
