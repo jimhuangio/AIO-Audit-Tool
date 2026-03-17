@@ -29,15 +29,15 @@ export function TopicRow({ topic, onBrief, onRename, onDragStart, onContextMenu,
         </button>
         {topic.topKeywords && (
           <div className="flex flex-wrap gap-1 mt-0.5">
-            {topic.topKeywords.split('|').map(kw => (
-              <span key={kw} className="text-xs text-gray-400">{kw}</span>
+            {topic.topKeywords.split('|').map((kw, i) => (
+              <span key={i} className="text-xs text-gray-400">{kw}</span>
             ))}
           </div>
         )}
       </td>
       <td className="px-3 py-1.5 text-right text-sm text-gray-500 tabular-nums">
         {topic.totalSearchVolume != null
-          ? `$${topic.totalSearchVolume.toLocaleString()}`
+          ? topic.totalSearchVolume.toLocaleString()
           : '—'}
       </td>
       <td className="px-3 py-1.5 text-right text-sm text-gray-500 tabular-nums">
