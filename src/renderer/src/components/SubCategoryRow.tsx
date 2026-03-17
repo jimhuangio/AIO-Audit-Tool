@@ -84,7 +84,7 @@ export function SubCategoryRow({
             onClick={() => onReport(subCategory.id)}
             className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            📄 Report
+            Report
           </button>
         </td>
       </tr>
@@ -95,7 +95,7 @@ export function SubCategoryRow({
           key={topic.id}
           topic={topic}
           onBrief={onBrief}
-          onRename={(id, label, x, y) => onRenameTopic(id, label, x, y)}
+          onRename={onRenameTopic}
           onDragStart={onTopicDragStart}
           onContextMenu={onTopicContextMenu}
           parentMainCategoryId={parentMainCategoryId}
