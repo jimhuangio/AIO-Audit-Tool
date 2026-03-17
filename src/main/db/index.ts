@@ -759,6 +759,8 @@ export function clearTopics(): void {
   `)
 }
 
+// ─── Category hierarchy ───────────────────────────────────────────────────────
+
 export interface CategoryHierarchyInput {
   mainCategories: {
     label: string
@@ -1052,9 +1054,10 @@ export function renameSubCategory(id: number, label: string): void {
 export function reorderCategories(
   updates: { id: number; level: 'main' | 'sub'; position: number }[]
 ): void {
-  const updateMain = getDB().prepare(`UPDATE main_categories SET position = ? WHERE id = ?`)
-  const updateSub  = getDB().prepare(`UPDATE sub_categories  SET position = ? WHERE id = ?`)
-  const tx = getDB().transaction(() => {
+  const db = getDB()
+  const updateMain = db.prepare(`UPDATE main_categories SET position = ? WHERE id = ?`)
+  const updateSub  = db.prepare(`UPDATE sub_categories  SET position = ? WHERE id = ?`)
+  const tx = db.transaction(() => {
     for (const u of updates) {
       if (u.level === 'main') updateMain.run(u.position, u.id)
       else updateSub.run(u.position, u.id)
