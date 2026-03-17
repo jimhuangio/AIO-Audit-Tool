@@ -750,7 +750,13 @@ export function getClusterableKeywords(): ClusterInput[] {
 
 export function clearTopics(): void {
   const db = getDB()
-  db.exec('DELETE FROM topic_keywords; DELETE FROM topics;')
+  db.exec(`
+    UPDATE topics SET sub_category_id = NULL;
+    DELETE FROM sub_categories;
+    DELETE FROM main_categories;
+    DELETE FROM topic_keywords;
+    DELETE FROM topics;
+  `)
 }
 
 // Wipes all research data for a fresh session.
@@ -808,6 +814,9 @@ export function clearProjectData(): void {
     DELETE FROM snippet_matches;
     DELETE FROM page_sections;
     DELETE FROM crawled_pages;
+    UPDATE topics SET sub_category_id = NULL;
+    DELETE FROM sub_categories;
+    DELETE FROM main_categories;
     DELETE FROM topic_keywords;
     DELETE FROM topics;
     DELETE FROM fanout_edges;
