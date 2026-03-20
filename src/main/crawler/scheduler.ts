@@ -2,6 +2,7 @@
 // runs snippet matching, stores results. Per-domain rate limiting.
 import { fetch } from 'undici'
 import { extractPageContent, extractPageContentFromMarkdown } from './extract'
+import { scraplingClient } from './scrapling-client'
 import { firecrawlScrape } from './firecrawl-client'
 import { readAllCredentials } from '../credentials'
 import { matchSnippetToSections } from './snippet-match'
@@ -32,6 +33,9 @@ export class CrawlScheduler {
   private active = false
   private window: BrowserWindow | null = null
   private progressInterval: NodeJS.Timeout | null = null
+
+  /** Called once when the queue fully drains (running === 0, queueLength === 0). */
+  onComplete?: () => void
 
   // Per-domain last-request timestamp for rate limiting
   private domainLastRequest = new Map<string, number>()
@@ -102,6 +106,11 @@ export class CrawlScheduler {
 
   get isRunning(): boolean {
     return this.active && !this.paused
+  }
+
+  /** True when no URLs are queued and no requests are in-flight. */
+  get isIdle(): boolean {
+    return this.queueLength === 0 && this.running === 0
   }
 
   get queueLength(): number {
@@ -175,6 +184,11 @@ export class CrawlScheduler {
         .catch(err => console.error(`[crawl] unhandled error for ${url}:`, err))
         .finally(() => {
           this.running--
+          if (this.running === 0 && this.queueLength === 0 && this.onComplete) {
+            const cb = this.onComplete
+            this.onComplete = undefined
+            cb()
+          }
           setImmediate(() => this.drain())
         })
     }
@@ -195,7 +209,6 @@ export class CrawlScheduler {
     let isLikelyEmpty = false
 
     // ── Step 1: Direct fetch ──────────────────────────────────────────────
-    const firecrawlKey = readAllCredentials()['firecrawl']?.apiKey ?? ''
     let html = ''
     try {
       const res = await fetch(url, {
@@ -234,13 +247,42 @@ export class CrawlScheduler {
       else if (sections.length > 0 && errorMsg?.startsWith('http ')) errorMsg = null
     }
 
-    // ── Step 2: Firecrawl fallback — only when direct fetch had issues ────
-    // Skip for permanent failures (404, 410, 5xx, non-HTML) where Firecrawl won't help.
-    const directFailed = isLikelyEmpty || (sections.length === 0)
+    // ── Step 2: Scrapling fallback — JS rendering + Cloudflare bypass ─────
+    // Skip for permanent failures (404, 410, 5xx, non-HTML) where re-fetching won't help.
+    const directFailed    = isLikelyEmpty || (sections.length === 0)
     const permanentFailure = /^(http (404|410|[45]\d\d)|non-html content-type)/.test(errorMsg ?? '')
 
-    if (firecrawlKey && directFailed && !permanentFailure) {
-      console.log(`[crawl] direct fetch insufficient for ${url} (${errorMsg ?? 'no sections'}), trying Firecrawl`)
+    if (directFailed && !permanentFailure) {
+      // Lazily start the sidecar on first need — subsequent calls reuse it
+      try {
+        await scraplingClient.start()
+      } catch {
+        // Python/Scrapling not installed — skip silently, fall through to Firecrawl
+      }
+
+      if (scraplingClient.isReady) {
+        console.log(`[crawl] direct fetch insufficient for ${url} (${errorMsg ?? 'no sections'}), trying Scrapling`)
+        try {
+          const result = await scraplingClient.scrape(url)
+          title = result.title
+          const extracted = extractPageContentFromMarkdown(result.markdown, title, metaDesc)
+          sections = extracted.sections
+          isLikelyEmpty = extracted.isLikelyEmpty
+          if (!isLikelyEmpty) errorMsg = null
+          else errorMsg = 'empty content (scrapling)'
+        } catch (err) {
+          console.warn(`[crawl] Scrapling failed for ${url}:`, err)
+          // keep original errorMsg, fall through to Firecrawl
+        }
+      }
+    }
+
+    // ── Step 3: Firecrawl fallback — last resort, requires API key ────────
+    const stillFailed = isLikelyEmpty || (sections.length === 0)
+    const firecrawlKey = readAllCredentials()['firecrawl']?.apiKey ?? ''
+
+    if (firecrawlKey && stillFailed && !permanentFailure) {
+      console.log(`[crawl] Scrapling insufficient for ${url}, trying Firecrawl`)
       try {
         const result = await firecrawlScrape(url, firecrawlKey)
         statusCode = result.statusCode
@@ -252,7 +294,6 @@ export class CrawlScheduler {
         errorMsg = isLikelyEmpty ? 'empty content (firecrawl)' : null
       } catch (err) {
         console.warn(`[crawl] Firecrawl also failed for ${url}:`, err)
-        // keep original errorMsg from direct fetch
       }
     }
 

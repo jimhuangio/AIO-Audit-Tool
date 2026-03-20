@@ -2,6 +2,10 @@ import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { writeFileSync, mkdtempSync, existsSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
 import {
   openProject,
   createProject,
@@ -27,6 +31,7 @@ import {
   getCrawlStats,
   getCrawledPageRows,
   getSnippetMatchesForKeyword,
+  getKeywordsMatchingSnippet,
   getClusterableKeywords,
   clearTopics,
   clearProjectData,
@@ -414,6 +419,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return getSnippetMatchesForKeyword(keywordId)
   })
 
+  ipcMain.handle('keywords:snippetSearch', (_e, term: string) => {
+    return getKeywordsMatchingSnippet(term)
+  })
+
   // ─── Topics ───────────────────────────────────────────────────────────────
 
   ipcMain.handle('topics:run', async () => {
@@ -593,7 +602,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const snippets  = getTopicAIOSnippets(topicId)
     const brief = await generateContentBrief(topic.label, keywords, snippets, topic.topDomain ?? null, apiKey)
 
-    const html = buildBriefHTML(topic.label, brief)
+    const html = buildBriefHTML(topic.label, brief, keywords)
     const filePath = resolveExportPath(
       `${topic.label.replace(/[^a-z0-9]/gi, '_')}_Content_Brief.html`,
       'fanout-brief-'
@@ -682,6 +691,50 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     writeFileSync(filePath, html, 'utf8')
     await shell.openPath(filePath)
     return { filePath }
+  })
+
+  // ─── Scrapling installer ──────────────────────────────────────────────────
+
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+
+  ipcMain.handle('scrapling:status', async () => {
+    let python = false
+    let scrapling = false
+    try {
+      await execAsync(`${pythonCmd} --version`)
+      python = true
+    } catch { /* python not found */ }
+    if (python) {
+      try {
+        await execAsync(`${pythonCmd} -c "import scrapling"`)
+        scrapling = true
+      } catch { /* not installed */ }
+    }
+    return { python, scrapling }
+  })
+
+  ipcMain.handle('scrapling:install', async () => {
+    try {
+      const { stdout, stderr } = await execAsync(
+        `${pythonCmd} -m pip install scrapling`,
+        { timeout: 180_000 }
+      )
+      return { ok: true, output: (stdout + '\n' + stderr).trim() }
+    } catch (err: any) {
+      return { ok: false, output: (err.stdout ?? '') + (err.stderr ?? '') || err.message }
+    }
+  })
+
+  ipcMain.handle('scrapling:installBrowsers', async () => {
+    try {
+      const { stdout, stderr } = await execAsync(
+        'scrapling install',
+        { timeout: 300_000 }
+      )
+      return { ok: true, output: (stdout + '\n' + stderr).trim() }
+    } catch (err: any) {
+      return { ok: false, output: (err.stdout ?? '') + (err.stderr ?? '') || err.message }
+    }
   })
 
   // ─── Global API Credentials ───────────────────────────────────────────────

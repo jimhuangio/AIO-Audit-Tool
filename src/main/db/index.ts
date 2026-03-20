@@ -540,6 +540,22 @@ export function getAIOSourcesForKeyword(keywordId: number): AIOSourceRow[] {
     .all(keywordId) as AIOSourceRow[]
 }
 
+// Returns one row per keyword that has an aio_snippet containing `term`.
+// The snippet returned is the first matching one for that keyword.
+export function getKeywordsMatchingSnippet(
+  term: string
+): { keywordId: number; snippet: string }[] {
+  if (!term.trim()) return []
+  return getDB()
+    .prepare(
+      `SELECT keyword_id AS keywordId, aio_snippet AS snippet
+       FROM aio_sources
+       WHERE aio_snippet LIKE '%' || ? || '%'
+       GROUP BY keyword_id`
+    )
+    .all(term) as { keywordId: number; snippet: string }[]
+}
+
 export function getPAAQuestionsForKeyword(keywordId: number): PAAQuestionRow[] {
   return getDB()
     .prepare(

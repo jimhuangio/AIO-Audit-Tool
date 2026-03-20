@@ -168,6 +168,9 @@ const api = {
   getSnippetMatches: (keywordId: number): Promise<SnippetMatchRow[]> =>
     ipcRenderer.invoke('crawl:snippetMatches', keywordId),
 
+  snippetSearch: (term: string): Promise<{ keywordId: number; snippet: string }[]> =>
+    ipcRenderer.invoke('keywords:snippetSearch', term),
+
   onCrawlProgress: (callback: (stats: CrawlStats) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, stats: CrawlStats): void => callback(stats)
     ipcRenderer.on('crawl:progress', handler)
@@ -242,6 +245,16 @@ const api = {
   // ─── Report ───────────────────────────────────────────────────────────────
   generateReport: (): Promise<{ filePath: string }> =>
     ipcRenderer.invoke('report:generate'),
+
+  // ─── Scrapling installer ──────────────────────────────────────────────────
+  scraplingStatus: (): Promise<{ python: boolean; scrapling: boolean }> =>
+    ipcRenderer.invoke('scrapling:status'),
+
+  scraplingInstall: (): Promise<{ ok: boolean; output: string }> =>
+    ipcRenderer.invoke('scrapling:install'),
+
+  scraplingInstallBrowsers: (): Promise<{ ok: boolean; output: string }> =>
+    ipcRenderer.invoke('scrapling:installBrowsers'),
 
   // ─── Global API Credentials ───────────────────────────────────────────────
   getAllCredentials: (): Promise<Record<string, Record<string, string>>> =>

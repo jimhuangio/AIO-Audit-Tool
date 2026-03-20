@@ -63,6 +63,12 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
   const [firecrawlTestMsg, setFirecrawlTestMsg] = useState('')
   const [firecrawlTesting, setFirecrawlTesting] = useState(false)
 
+  // Scrapling installer
+  const [scraplingStatus, setScraplingStatus] = useState<{ python: boolean; scrapling: boolean } | null>(null)
+  const [scraplingInstalling, setScraplingInstalling] = useState(false)
+  const [scraplingInstallingBrowsers, setScraplingInstallingBrowsers] = useState(false)
+  const [scraplingOutput, setScraplingOutput] = useState('')
+
   // Generic "other APIs" entries
   const [customEntries, setCustomEntries] = useState<{ service: string; key: string; value: string }[]>([])
   const [addingNew, setAddingNew] = useState(false)
@@ -73,6 +79,11 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
   const [saveMsg, setSaveMsg] = useState('')
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
+
+  // Check Scrapling install status on mount
+  useEffect(() => {
+    window.api.scraplingStatus().then(setScraplingStatus).catch(() => {})
+  }, [])
 
   // Populate fields from stored credentials
   useEffect(() => {
@@ -179,6 +190,38 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
     await window.api.removeCredentials('firecrawl')
     setFirecrawlApiKey('')
     queryClient.invalidateQueries({ queryKey: ['credentials'] })
+  }
+
+  async function handleCheckScraplingStatus(): Promise<void> {
+    setScraplingStatus(null)
+    const status = await window.api.scraplingStatus()
+    setScraplingStatus(status)
+  }
+
+  async function handleInstallScrapling(): Promise<void> {
+    setScraplingInstalling(true)
+    setScraplingOutput('')
+    try {
+      const result = await window.api.scraplingInstall()
+      setScraplingOutput(result.output)
+      if (result.ok) {
+        const status = await window.api.scraplingStatus()
+        setScraplingStatus(status)
+      }
+    } finally {
+      setScraplingInstalling(false)
+    }
+  }
+
+  async function handleInstallScraplingBrowsers(): Promise<void> {
+    setScraplingInstallingBrowsers(true)
+    setScraplingOutput('')
+    try {
+      const result = await window.api.scraplingInstallBrowsers()
+      setScraplingOutput(result.output)
+    } finally {
+      setScraplingInstallingBrowsers(false)
+    }
   }
 
   async function handleSaveCustom(service: string, key: string, value: string): Promise<void> {
@@ -365,6 +408,67 @@ function CredentialsSection({ project }: { project: ProjectMeta | null }): JSX.E
               </span>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Scrapling */}
+      <div className="mb-5">
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Scrapling (JS Crawler)
+        </div>
+        <div className="space-y-3 pl-1">
+          <p className="text-xs text-gray-500">
+            Local JS rendering + Cloudflare bypass. Tier 2 crawler — no API key required.
+            Requires Python 3 and the Scrapling package with Playwright browsers.
+          </p>
+          <div className="flex items-center gap-4 text-xs">
+            <span className="text-gray-500 w-24">Python 3</span>
+            {scraplingStatus === null ? (
+              <span className="text-gray-400">Checking…</span>
+            ) : scraplingStatus.python ? (
+              <span className="text-green-600">✓ Available</span>
+            ) : (
+              <span className="text-red-500">✗ Not found — install Python 3 from python.org</span>
+            )}
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <span className="text-gray-500 w-24">Scrapling</span>
+            {scraplingStatus === null ? (
+              <span className="text-gray-400">Checking…</span>
+            ) : scraplingStatus.scrapling ? (
+              <span className="text-green-600">✓ Installed</span>
+            ) : (
+              <span className="text-orange-500">✗ Not installed</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 pt-1 flex-wrap">
+            <button
+              onClick={handleCheckScraplingStatus}
+              className="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition-colors border border-gray-300"
+            >
+              Check Status
+            </button>
+            <button
+              onClick={handleInstallScrapling}
+              disabled={scraplingInstalling || scraplingStatus?.scrapling === true}
+              className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded transition-colors"
+            >
+              {scraplingInstalling ? 'Installing…' : 'Install Scrapling'}
+            </button>
+            <button
+              onClick={handleInstallScraplingBrowsers}
+              disabled={scraplingInstallingBrowsers || scraplingStatus?.scrapling !== true}
+              className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded transition-colors"
+              title="Installs Playwright Chromium browsers required for JS rendering"
+            >
+              {scraplingInstallingBrowsers ? 'Installing Browsers…' : 'Install Browsers'}
+            </button>
+          </div>
+          {scraplingOutput && (
+            <pre className="mt-2 p-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
+              {scraplingOutput}
+            </pre>
+          )}
         </div>
       </div>
 

@@ -51,9 +51,101 @@ export function buildReportHTML(d: ReportData): string {
       ? topic.totalSearchVolume.toLocaleString() + '/mo'
       : '—'
 
-    // Element breakdown bar chart
+    // ── Factors row ─────────────────────────────────────────────────────────
+    // Intent distribution
+    const intentCounts: Record<string, number> = {}
+    for (const kw of keywords) {
+      if (kw.searchIntent) intentCounts[kw.searchIntent] = (intentCounts[kw.searchIntent] ?? 0) + 1
+    }
+    const intentTotal = Object.values(intentCounts).reduce((s, n) => s + n, 0)
+    const intentBars = Object.entries(intentCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([intent, n]) => {
+        const pct = intentTotal > 0 ? Math.round((n / intentTotal) * 100) : 0
+        const color = INTENT_COLORS[intent] ?? '#6b7280'
+        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+          <span style="font-size:10px;color:${color};text-transform:capitalize;width:80px;flex-shrink:0">${intent}</span>
+          <div style="flex:1;background:#f3f4f6;border-radius:2px;overflow:hidden;height:8px">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:2px"></div>
+          </div>
+          <span style="font-size:10px;color:#9ca3af;width:30px;text-align:right;flex-shrink:0">${pct}%</span>
+        </div>`
+      }).join('')
+    const intentDistSection = intentTotal > 0
+      ? `<div>
+           <div style="font-size:9px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Search Intent Mix</div>
+           ${intentBars}
+         </div>`
+      : ''
+
+    // Top HTML element signal
+    const topElement = elements[0]
     const totalMatches = elements.reduce((s, e) => s + e.count, 0)
-    const elementBars = elements.slice(0, 8).map(e => {
+    const topElementSection = topElement
+      ? (() => {
+          const pct = totalMatches > 0 ? Math.round((topElement.count / totalMatches) * 100) : 0
+          const elementBars = elements.slice(0, 6).map(e => {
+            const ep = totalMatches > 0 ? Math.round((e.count / totalMatches) * 100) : 0
+            const tag = escHtml(e.sectionType)
+            return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+              <span style="font-size:10px;font-family:monospace;color:#374151;width:72px;flex-shrink:0">&lt;${tag}&gt;</span>
+              <div style="flex:1;background:#f3f4f6;border-radius:2px;overflow:hidden;height:8px">
+                <div style="width:${ep}%;height:100%;background:#3b82f6;border-radius:2px"></div>
+              </div>
+              <span style="font-size:10px;color:#9ca3af;width:30px;text-align:right;flex-shrink:0">${ep}%</span>
+            </div>`
+          }).join('')
+          return `<div>
+            <div style="font-size:9px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">HTML Elements in AIO Snippets <span style="font-weight:400;text-transform:none;letter-spacing:0">(${totalMatches.toLocaleString()} matches)</span></div>
+            ${elementBars}
+            ${pct > 0 ? `<div style="margin-top:4px;font-size:10px;color:#6b7280">Dominant: <span style="font-family:monospace;color:#1d4ed8">&lt;${escHtml(topElement.sectionType)}&gt;</span> (${pct}% of snippet matches)</div>` : ''}
+          </div>`
+        })()
+      : ''
+
+    // Volume signal
+    const kwWithVol = keywords.filter(k => k.searchVolume != null)
+    const volumeSection = `<div>
+      <div style="font-size:9px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Keyword Volume</div>
+      <div style="font-size:20px;font-weight:700;color:#111;line-height:1">${traffic}</div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:4px">combined monthly search volume</div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:2px">${kwWithVol.length} of ${keywords.length} keywords have volume data</div>
+    </div>`
+
+    // Schema signal summary
+    const schemaColors: Record<string, string> = {
+      FAQPage:       '#7c3aed', HowTo: '#7c3aed',
+      Article:       '#1d4ed8', NewsArticle: '#1d4ed8', BlogPosting: '#1d4ed8',
+      WebPage:       '#0369a1', WebSite: '#0369a1',
+      Organization:  '#0f766e', LocalBusiness: '#0f766e', Person: '#0f766e',
+      Product:       '#b45309', Offer: '#b45309', ItemList: '#b45309',
+      BreadcrumbList:'#6b7280', SiteLinksSearchBox: '#6b7280',
+    }
+    const schemaSignalSection = schemas.length > 0
+      ? `<div>
+           <div style="font-size:9px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Structured Data Signals</div>
+           <div style="display:flex;flex-wrap:wrap;gap:4px">
+             ${schemas.slice(0, 6).map(s => {
+               const color = schemaColors[s.schemaType] ?? '#374151'
+               return `<span style="background:${color}18;color:${color};border:1px solid ${color}44;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:500;white-space:nowrap">${escHtml(s.schemaType)} <span style="opacity:0.6">×${s.count}</span></span>`
+             }).join('')}
+           </div>
+         </div>`
+      : ''
+
+    const factorsRow = [volumeSection, intentDistSection, topElementSection, schemaSignalSection]
+      .filter(Boolean)
+      .map(s => `<div style="flex:1;min-width:160px">${s}</div>`)
+      .join(`<div style="width:1px;background:#f3f4f6;flex-shrink:0"></div>`)
+
+    const factorsSection = `
+      <div style="padding:12px 16px;border-top:1px solid #e5e7eb;background:#fafafa">
+        <div style="font-size:9px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Analysis Factors</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">${factorsRow}</div>
+      </div>`
+
+    // Full element breakdown (detailed)
+    const elementBarsDetailed = elements.slice(0, 8).map(e => {
       const pct = totalMatches > 0 ? Math.round((e.count / totalMatches) * 100) : 0
       const tag = escHtml(e.sectionType)
       return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -66,22 +158,33 @@ export function buildReportHTML(d: ReportData): string {
       </div>`
     }).join('')
 
+    const topElementExplanation = (() => {
+      if (!topElement || totalMatches === 0) return ''
+      const pct = Math.round((topElement.count / totalMatches) * 100)
+      const tag = topElement.sectionType.toLowerCase()
+      const explanations: Record<string, string> = {
+        h1: 'Pages cited in AI Overviews lead with a clear H1. Ensure your primary keyword appears in a single, prominent page title.',
+        h2: 'H2 headings dominate AIO citations for this topic. Structure your content with descriptive H2s that directly address the search intent — Google\'s AI draws from heading-level sections most often.',
+        h3: 'H3 subheadings are the most cited element. Organise supporting detail under clear H3s within each major section to increase snippet eligibility.',
+        p:  'Paragraph prose is the primary citation source. Write substantive, well-structured paragraphs that answer questions directly and concisely.',
+        li: 'List items are the dominant cited format. Present key information as scannable bullet or numbered lists — AI Overviews frequently pull from list-structured content.',
+        blockquote: 'Blockquote/highlighted content performs well. Use pull quotes or highlighted statements to surface key claims clearly.',
+      }
+      const explanation = explanations[tag] ?? `<${tag}> elements are the most cited format. Ensure this element type contains clear, on-topic content.`
+      return `<div style="margin-top:10px;padding:8px 12px;background:#eff6ff;border-radius:6px;border-left:3px solid #3b82f6">
+        <span style="font-size:10px;font-weight:600;color:#1d4ed8">&lt;${escHtml(topElement.sectionType)}&gt; appears in ${pct}% of AIO snippet matches for this topic.</span>
+        <span style="font-size:10px;color:#374151;display:block;margin-top:3px">${explanation}</span>
+      </div>`
+    })()
+
     const elementsSection = elements.length > 0
       ? `<div style="padding:10px 16px 12px;border-top:1px solid #f3f4f6">
            <div style="font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Best-Performing HTML Elements</div>
-           ${elementBars}
+           ${elementBarsDetailed}
+           ${topElementExplanation}
          </div>`
       : ''
 
-    // Schema type badges — colour-coded by how common they are in AIO-ranking pages
-    const schemaColors: Record<string, string> = {
-      FAQPage:       '#7c3aed', HowTo: '#7c3aed',
-      Article:       '#1d4ed8', NewsArticle: '#1d4ed8', BlogPosting: '#1d4ed8',
-      WebPage:       '#0369a1', WebSite: '#0369a1',
-      Organization:  '#0f766e', LocalBusiness: '#0f766e', Person: '#0f766e',
-      Product:       '#b45309', Offer: '#b45309', ItemList: '#b45309',
-      BreadcrumbList:'#6b7280', SiteLinksSearchBox: '#6b7280',
-    }
     const schemaBadges = schemas.slice(0, 12).map(s => {
       const color = schemaColors[s.schemaType] ?? '#374151'
       return `<span style="display:inline-flex;align-items:center;gap:4px;background:${color}18;color:${color};border:1px solid ${color}44;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:500;white-space:nowrap">
@@ -101,12 +204,18 @@ export function buildReportHTML(d: ReportData): string {
       <div style="background:#f9fafb;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:600;color:#111">${escHtml(topic.label)}</span>
         <span style="font-size:11px;color:#6b7280">${topic.memberCount} keywords</span>
-        <span style="font-size:11px;color:#6b7280">Est. traffic: <strong style="color:#111">${traffic}</strong></span>
         <span style="font-size:11px;color:#6b7280;margin-left:auto">Most shown: ${topDomainBadge}</span>
         <span style="font-size:11px;color:#6b7280">Highest rank: ${bestDomainBadge}</span>
       </div>
+      ${factorsSection}
       <div style="padding:12px 16px">
+        <div style="font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Keywords &amp; Search Volume</div>
         <table style="width:100%;border-collapse:collapse">
+          <tr style="border-bottom:1px solid #f3f4f6">
+            <th style="padding:3px 10px 3px 0;font-size:10px;font-weight:600;color:#9ca3af;text-align:left">Keyword</th>
+            <th style="padding:3px 10px;font-size:10px;font-weight:600;color:#9ca3af;text-align:right">Volume/mo</th>
+            <th style="padding:3px 0;font-size:10px;font-weight:600;color:#9ca3af;text-align:left">Intent</th>
+          </tr>
           ${kwRows || '<tr><td style="color:#9ca3af;font-size:12px;padding:4px 0">No keywords loaded</td></tr>'}
         </table>
       </div>
@@ -207,8 +316,41 @@ function escHtml(s: string): string {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
 }
 
-export function buildBriefHTML(topicLabel: string, brief: ContentBrief): string {
+export function buildBriefHTML(topicLabel: string, brief: ContentBrief, keywords: TopicKeywordRow[] = []): string {
   const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  const kwTableRows = keywords
+    .sort((a, b) => (b.searchVolume ?? -1) - (a.searchVolume ?? -1))
+    .map(kw => {
+      const intentColor = kw.searchIntent ? (INTENT_COLORS[kw.searchIntent] ?? '#6b7280') : ''
+      const intentBadge = kw.searchIntent
+        ? `<span style="background:${intentColor}22;color:${intentColor};padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500;text-transform:capitalize">${kw.searchIntent}</span>`
+        : '—'
+      const vol = kw.searchVolume != null
+        ? kw.searchVolume.toLocaleString()
+        : '—'
+      return `<tr style="border-bottom:1px solid #f3f4f6">
+        <td style="padding:5px 12px 5px 0;font-size:12px;color:#111;font-family:monospace">${escHtml(kw.keyword)}</td>
+        <td style="padding:5px 12px;text-align:right;font-size:12px;color:#6b7280;white-space:nowrap">${vol}</td>
+        <td style="padding:5px 0">${intentBadge}</td>
+      </tr>`
+    }).join('')
+
+  const kwSection = keywords.length > 0
+    ? `<h2 style="font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Keywords &amp; Search Volume</h2>
+       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:28px">
+         <table style="width:100%;border-collapse:collapse">
+           <thead>
+             <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb">
+               <th style="padding:7px 12px 7px 0;font-size:10px;font-weight:600;color:#9ca3af;text-align:left;text-transform:uppercase;letter-spacing:0.05em">Keyword</th>
+               <th style="padding:7px 12px;font-size:10px;font-weight:600;color:#9ca3af;text-align:right;text-transform:uppercase;letter-spacing:0.05em">Volume/mo</th>
+               <th style="padding:7px 0;font-size:10px;font-weight:600;color:#9ca3af;text-align:left;text-transform:uppercase;letter-spacing:0.05em">Intent</th>
+             </tr>
+           </thead>
+           <tbody style="padding:0 16px">${kwTableRows}</tbody>
+         </table>
+       </div>`
+    : ''
 
   const keyTopicsHTML = brief.keyTopics.length > 0
     ? `<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px">
@@ -270,6 +412,9 @@ export function buildBriefHTML(topicLabel: string, brief: ContentBrief): string 
       <div style="font-size:13px;font-weight:500;color:#111">${escHtml(brief.wordCount)}</div>
     </div>
   </div>
+
+  <!-- Keywords -->
+  ${kwSection}
 
   <!-- Key Topics -->
   ${keyTopicsHTML ? `

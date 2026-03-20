@@ -12,7 +12,7 @@ import {
 } from '../db'
 import { processKeyword, setRunMeta, clearRunMeta } from './worker'
 import { runEnrichment } from './enrich'
-import { runClustering } from '../topics/run'
+import { runClustering, runCategorisation } from '../topics/run'
 import { crawlScheduler } from '../crawler/scheduler'
 import type { BrowserWindow } from 'electron'
 
@@ -105,9 +105,6 @@ export class FanoutScheduler {
   private window: BrowserWindow | null = null
   private running = false
   private progressInterval: NodeJS.Timeout | null = null
-  private keywordsDoneSinceCluster = 0
-  private reclusterTimer: NodeJS.Timeout | null = null
-  private static readonly RECLUSTER_EVERY = 10  // re-cluster after every N keywords finish
 
   constructor(
     private concurrency = 5,
@@ -146,19 +143,9 @@ export class FanoutScheduler {
 
   private startEnrichment(): void {
     this.runEnrichmentWithRetry(1)
-      .then(async () => {
-        // Final topic cluster pass with all enriched data
-        const inputs = getClusterableKeywords()
-        if (inputs.length > 0) {
-          await runClustering(inputs)
-            .then(clusters => {
-              clearTopics()
-              insertTopics(clusters)
-              console.log(`[scheduler] final recluster: ${clusters.length} topics`)
-              this.window?.webContents.send('topics:updated')
-            })
-            .catch(err => console.error('[scheduler] final recluster error:', err))
-        }
+      .then(() => {
+        // Keyword research + enrichment done — schedule grouping after crawling finishes
+        this.scheduleGroupingAfterCrawl()
       })
       .catch(err => console.error('[scheduler] enrichment error:', err))
       .finally(() => {
@@ -166,6 +153,34 @@ export class FanoutScheduler {
         this.broadcastComplete()
         this.stop()
       })
+  }
+
+  private scheduleGroupingAfterCrawl(): void {
+    if (crawlScheduler.isIdle) {
+      // Crawling already finished (or never started) — group now
+      void this.runGrouping()
+    } else {
+      // Wait for crawling to finish, then group
+      crawlScheduler.onComplete = () => { void this.runGrouping() }
+      console.log('[scheduler] grouping deferred — waiting for crawl to complete')
+    }
+  }
+
+  private async runGrouping(): Promise<void> {
+    console.log('[scheduler] starting grouping (clustering + categorisation)')
+    const inputs = getClusterableKeywords()
+    if (inputs.length === 0) return
+    try {
+      const clusters = await runClustering(inputs)
+      clearTopics()
+      insertTopics(clusters)
+      console.log(`[scheduler] grouped ${clusters.length} topics`)
+      await runCategorisation()
+    } catch (err) {
+      console.error('[scheduler] grouping error:', err)
+    } finally {
+      this.window?.webContents.send('topics:updated')
+    }
   }
 
   private async runEnrichmentWithRetry(attempt: number): Promise<void> {
@@ -211,7 +226,6 @@ export class FanoutScheduler {
     this.queue.pause()
     this.queue.clear()
     this.stopProgressBroadcast()
-    if (this.reclusterTimer) { clearTimeout(this.reclusterTimer); this.reclusterTimer = null }
     clearRunMeta()
     console.log('[scheduler] stopped')
   }
@@ -232,33 +246,9 @@ export class FanoutScheduler {
   private workerCallbacks() {
     return {
       onChildrenAdded: (ids: number[]) => this.addChildren(ids),
-      onProgress: () => {
-        this.broadcastProgress()
-        this.scheduleRecluster()
-      },
+      onProgress: () => this.broadcastProgress(),
       onNewURLs: (urls: string[]) => crawlScheduler.feedURLs(urls)
     }
-  }
-
-  private scheduleRecluster(): void {
-    this.keywordsDoneSinceCluster++
-    if (this.keywordsDoneSinceCluster < FanoutScheduler.RECLUSTER_EVERY) return
-    this.keywordsDoneSinceCluster = 0
-    // Debounce: if one is already pending, let it run
-    if (this.reclusterTimer) return
-    this.reclusterTimer = setTimeout(() => {
-      this.reclusterTimer = null
-      const inputs = getClusterableKeywords()
-      if (inputs.length === 0) return
-      runClustering(inputs)
-        .then(clusters => {
-          clearTopics()
-          insertTopics(clusters)
-          console.log(`[scheduler] re-clustered ${clusters.length} topics`)
-          this.window?.webContents.send('topics:updated')
-        })
-        .catch(err => console.error('[scheduler] recluster error:', err))
-    }, 2000)
   }
 
   private drainPending(): void {

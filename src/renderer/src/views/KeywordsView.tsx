@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react'
+import React, { useState, useRef, useMemo, useEffect } from 'react'
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../store/app-store'
 import { KeywordDetailPanel } from './KeywordDetailPanel'
@@ -49,6 +49,16 @@ export function KeywordsView(): JSX.Element {
   const [selectedKw, setSelectedKw] = useState<{ id: number; keyword: string } | null>(null)
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [filterIntent, setFilterIntent] = useState<string>('all')
+  const [filterVolMin, setFilterVolMin] = useState('')
+  const [snippetQuery, setSnippetQuery] = useState('')
+  const [snippetQueryDebounced, setSnippetQueryDebounced] = useState('')
+
+  // Debounce snippet search input by 400ms
+  useEffect(() => {
+    const t = setTimeout(() => setSnippetQueryDebounced(snippetQuery.trim()), 400)
+    return () => clearTimeout(t)
+  }, [snippetQuery])
 
   const { data: keywords = [], isLoading } = useQuery({
     queryKey: ['keywords', 'rows'],
@@ -83,6 +93,20 @@ export function KeywordsView(): JSX.Element {
     }))
   })
 
+  // Snippet search — fires when debounced query changes
+  const { data: snippetMatchRows = [] } = useQuery({
+    queryKey: ['keywords', 'snippetSearch', snippetQueryDebounced],
+    queryFn: () => window.api.snippetSearch(snippetQueryDebounced),
+    enabled: !!project && snippetQueryDebounced.length >= 2
+  })
+
+  // Map: keywordId -> first matching snippet text
+  const snippetMatchMap = useMemo(() => {
+    const map = new Map<number, string>()
+    snippetMatchRows.forEach(r => map.set(r.keywordId, r.snippet))
+    return map
+  }, [snippetMatchRows])
+
   // Stable key derived from data update timestamps — prevents re-running when the
   // useQueries array reference changes but no data has actually updated.
   const domainDataKey = domainPositionResults.map(r => r.dataUpdatedAt ?? 0).join(',')
@@ -114,9 +138,12 @@ export function KeywordsView(): JSX.Element {
   }, [organicDomains, organicDataKey])
 
   const filtered = useMemo(() => {
+    const volMin = filterVolMin !== '' ? parseInt(filterVolMin, 10) : null
     const rows = keywords.filter((k) => {
       if (filterStatus !== 'all' && k.status !== filterStatus) return false
       if (filterText && !k.keyword.toLowerCase().includes(filterText.toLowerCase())) return false
+      if (filterIntent !== 'all' && (k.searchIntent ?? '').toLowerCase() !== filterIntent) return false
+      if (volMin !== null && !isNaN(volMin) && (k.searchVolume == null || k.searchVolume < volMin)) return false
       return true
     })
 
@@ -158,7 +185,7 @@ export function KeywordsView(): JSX.Element {
       if (valA > valB) return sortDir === 'asc' ? 1 : -1
       return 0
     })
-  }, [keywords, filterStatus, filterText, sortKey, sortDir, domainPositionMaps, organicPositionMaps])
+  }, [keywords, filterStatus, filterText, filterIntent, filterVolMin, sortKey, sortDir, domainPositionMaps, organicPositionMaps])
 
   function handleSort(key: string): void {
     if (sortKey === key) {
@@ -282,6 +309,51 @@ export function KeywordsView(): JSX.Element {
             className="px-2 py-1 text-xs bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-44"
           />
 
+          {/* AIO snippet search */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="AIO snippet contains…"
+              value={snippetQuery}
+              onChange={(e) => setSnippetQuery(e.target.value)}
+              className={`px-2 py-1 text-xs bg-white border rounded text-gray-900 placeholder-gray-400 focus:outline-none w-48
+                ${snippetQueryDebounced.length >= 2 && snippetMatchMap.size > 0
+                  ? 'border-amber-400 focus:border-amber-500'
+                  : 'border-gray-300 focus:border-blue-500'
+                }`}
+            />
+            {snippetQueryDebounced.length >= 2 && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-amber-600 font-medium">
+                {snippetMatchMap.size > 0 ? `${snippetMatchMap.size} kw` : '0'}
+              </span>
+            )}
+          </div>
+
+          {/* Intent filter */}
+          <select
+            value={filterIntent}
+            onChange={(e) => setFilterIntent(e.target.value)}
+            className="px-2 py-1 text-xs bg-white border border-gray-300 rounded text-gray-700 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All intents</option>
+            <option value="informational">Informational</option>
+            <option value="commercial">Commercial</option>
+            <option value="transactional">Transactional</option>
+            <option value="navigational">Navigational</option>
+          </select>
+
+          {/* Volume min filter */}
+          <div className="relative">
+            <input
+              type="number"
+              min="0"
+              placeholder="Min volume…"
+              value={filterVolMin}
+              onChange={(e) => setFilterVolMin(e.target.value)}
+              className="px-2 py-1 text-xs bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-32"
+            />
+          </div>
+
           {/* Domain column adder with autocomplete */}
           <div className="relative" ref={domainRef}>
             <input
@@ -391,8 +463,8 @@ export function KeywordsView(): JSX.Element {
                   {([
                     { key: 'keyword', label: 'Keyword',             align: 'left'  },
                     { key: 'status',  label: 'Status',              align: 'left'  },
-                    { key: 'depth',   label: 'Depth',               align: 'left'  },
-                    { key: 'aio',     label: 'AIO Results',         align: 'right' },
+                    { key: 'depth',   label: 'AIO Depth',           align: 'left'  },
+                    { key: 'aio',     label: 'AIO Count',           align: 'right' },
                     { key: 'volume',  label: 'Est. Monthly Volume', align: 'right', enriching: true },
                     { key: 'intent',  label: 'Intent',              align: 'left',  enriching: true },
                   ] as const).map(({ key, label, align, ...rest }) => (
@@ -436,23 +508,42 @@ export function KeywordsView(): JSX.Element {
               <tbody>
                 {filtered.map((kw: KeywordRow, i) => {
                   const isSelected = selectedKw?.id === kw.id
+                  const matchedSnippet = snippetMatchMap.get(kw.id)
+                  const isSnippetMatch = !!matchedSnippet
                   return (
                     <tr
                       key={kw.id}
                       onClick={() =>
                         setSelectedKw(isSelected ? null : { id: kw.id, keyword: kw.keyword })
                       }
-                      className={`border-b border-gray-100 cursor-pointer transition-colors
-                        ${isSelected ? 'bg-blue-50' : i % 2 === 0 ? 'hover:bg-gray-50' : 'bg-gray-50/50 hover:bg-gray-50'}
+                      className={`border-b cursor-pointer transition-colors
+                        ${isSnippetMatch
+                          ? isSelected
+                            ? 'border-amber-200 bg-amber-100'
+                            : 'border-amber-100 bg-amber-50 hover:bg-amber-100'
+                          : isSelected
+                            ? 'border-gray-100 bg-blue-50'
+                            : i % 2 === 0
+                              ? 'border-gray-100 hover:bg-gray-50'
+                              : 'border-gray-100 bg-gray-50/50 hover:bg-gray-50'
+                        }
                       `}
                     >
-                      <td className="px-3 py-1.5 text-xs text-gray-800 font-mono max-w-xs truncate">
+                      <td className="px-3 py-1.5 text-xs text-gray-800 font-mono max-w-xs">
                         {kw.parentId != null && (
                           <span className="text-gray-300 mr-1">
                             {'└'.repeat(Math.min(kw.depth, 3))}
                           </span>
                         )}
                         {kw.keyword}
+                        {isSnippetMatch && (
+                          <span
+                            className="ml-2 inline-block max-w-[200px] truncate align-middle text-[10px] text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 cursor-default"
+                            title={matchedSnippet}
+                          >
+                            {matchedSnippet}
+                          </span>
+                        )}
                         {kw.errorMsg && (
                           <span className="ml-2 text-red-500" title={kw.errorMsg}>
                             ⚠

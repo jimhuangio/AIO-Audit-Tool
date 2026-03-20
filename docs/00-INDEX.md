@@ -17,6 +17,7 @@
 | 08 | [Crawler Research](./08-crawler-research.md) | crawl4ai, Scrapling, and crawling strategy |
 | 09 | [Customer Communication](./09-customer-comms.md) | How to talk to non-technical stakeholders |
 | 10 | [Skills & Tools Registry](./10-skills-tools.md) | Claude Code skills, MCP servers, external tools |
+| 11 | [GEO/AEO Tracker Research](./11-geo-aeo-research.md) | Competitive analysis of geo-aeo-tracker; feature gaps and improvement suggestions |
 
 ---
 

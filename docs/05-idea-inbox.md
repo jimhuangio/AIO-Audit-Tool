@@ -106,6 +106,27 @@
 
 ---
 
+## AEO/SRO Readiness Signals (from geo-aeo-tracker research — March 2026)
+
+> Source analysis: [11-geo-aeo-research.md](./11-geo-aeo-research.md)
+
+| Idea | Effort | Value | Status |
+|------|--------|-------|--------|
+| AEO Readiness Score (0–100) per crawled URL — Schema, BLUF, heading structure, llms.txt, word count | S | High | Raw |
+| llms.txt detection per domain — single HEAD request cached per domain, badge in crawler view | XS | Med | Raw |
+| BLUF density heuristic in section extraction — flag sections that lead with direct answer | S | Med | Raw |
+| Enhanced Visibility Score — add citation frequency + position consistency + topic breadth to current Σ(11−pos) formula | S | Med | Raw |
+| Citation Opportunity View — dedicated tab: keywords where competitor is in AIO but your domain isn't | S | High | Raw |
+| Competitor Battlecard Generator — Gemini narrative summary per domain across topic clusters | M | High | Raw |
+| Perplexity citation detection — extend to non-Google AI models (Perplexity is #1 non-Google AIO source) | L | High | Raw |
+| Niche Explorer — Gemini generates 20–50 additional high-intent queries per topic cluster to complement PAA | M | Med | Raw |
+| Persona Fan-Out — test which domains are cited for persona-specific query variants (CFO vs frequent flyer) | L | Med | Raw |
+| AEO Site Audit Module — score any domain's top cited pages on Schema, BLUF, llms.txt, heading structure | L | High | Raw |
+| Demo mode with seed data — show tool to clients without API keys; deterministic sample project | M | Med | Raw |
+| "SRO" vocabulary — adopt Search Result Optimization as the label for crawler+audit workflow | XS | Med | Raw |
+
+---
+
 ## Competitive Landscape (Research — March 2026)
 
 **Finding:** No direct competitor provides AIO citation position tracking in a local-first desktop app.

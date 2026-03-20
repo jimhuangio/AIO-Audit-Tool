@@ -4,6 +4,7 @@ import { is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
 import { mcpClient } from './mcp/client'
 import { closeProject } from './db'
+import { scraplingClient } from './crawler/scrapling-client'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -57,5 +58,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   mcpClient.disconnect()
+  scraplingClient.stop()
   closeProject()
 })
