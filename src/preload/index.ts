@@ -171,6 +171,9 @@ const api = {
   snippetSearch: (term: string): Promise<{ keywordId: number; snippet: string }[]> =>
     ipcRenderer.invoke('keywords:snippetSearch', term),
 
+  getFeaturedSnippetIds: (): Promise<{ keywordId: number; snippetType: string }[]> =>
+    ipcRenderer.invoke('keywords:featuredSnippets'),
+
   onCrawlProgress: (callback: (stats: CrawlStats) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, stats: CrawlStats): void => callback(stats)
     ipcRenderer.on('crawl:progress', handler)

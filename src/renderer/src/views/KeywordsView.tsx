@@ -51,6 +51,7 @@ export function KeywordsView(): JSX.Element {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [filterIntent, setFilterIntent] = useState<string>('all')
   const [filterVolMin, setFilterVolMin] = useState('')
+  const [filterFeatured, setFilterFeatured] = useState<'off' | 'fs' | 'fs-no-aio'>('off')
   const [snippetQuery, setSnippetQuery] = useState('')
   const [snippetQueryDebounced, setSnippetQueryDebounced] = useState('')
 
@@ -100,6 +101,20 @@ export function KeywordsView(): JSX.Element {
     enabled: !!project && snippetQueryDebounced.length >= 2
   })
 
+  // Featured snippet detection
+  const { data: featuredSnippetRows = [] } = useQuery({
+    queryKey: ['keywords', 'featuredSnippets'],
+    queryFn: () => window.api.getFeaturedSnippetIds(),
+    enabled: !!project,
+    staleTime: 60_000
+  })
+
+  const featuredSnippetMap = useMemo(() => {
+    const map = new Map<number, string>()
+    featuredSnippetRows.forEach(r => map.set(r.keywordId, r.snippetType))
+    return map
+  }, [featuredSnippetRows])
+
   // Map: keywordId -> first matching snippet text
   const snippetMatchMap = useMemo(() => {
     const map = new Map<number, string>()
@@ -144,6 +159,8 @@ export function KeywordsView(): JSX.Element {
       if (filterText && !k.keyword.toLowerCase().includes(filterText.toLowerCase())) return false
       if (filterIntent !== 'all' && (k.searchIntent ?? '').toLowerCase() !== filterIntent) return false
       if (volMin !== null && !isNaN(volMin) && (k.searchVolume == null || k.searchVolume < volMin)) return false
+      if (filterFeatured === 'fs' && !featuredSnippetMap.has(k.id)) return false
+      if (filterFeatured === 'fs-no-aio' && (!featuredSnippetMap.has(k.id) || k.aioSourceCount > 0)) return false
       return true
     })
 
@@ -185,7 +202,7 @@ export function KeywordsView(): JSX.Element {
       if (valA > valB) return sortDir === 'asc' ? 1 : -1
       return 0
     })
-  }, [keywords, filterStatus, filterText, filterIntent, filterVolMin, sortKey, sortDir, domainPositionMaps, organicPositionMaps])
+  }, [keywords, filterStatus, filterText, filterIntent, filterVolMin, filterFeatured, featuredSnippetMap, sortKey, sortDir, domainPositionMaps, organicPositionMaps])
 
   function handleSort(key: string): void {
     if (sortKey === key) {
@@ -354,6 +371,29 @@ export function KeywordsView(): JSX.Element {
             />
           </div>
 
+          {/* Featured snippet filter */}
+          <div className="flex items-center rounded border border-gray-200 overflow-hidden text-xs">
+            {([
+              ['off',       'All'],
+              ['fs',        'Featured Snippet'],
+              ['fs-no-aio', 'FS · No AIO'],
+            ] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setFilterFeatured(val)}
+                className={`px-2.5 py-1 transition-colors whitespace-nowrap
+                  ${filterFeatured === val
+                    ? val === 'fs-no-aio'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-700 text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                  }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Domain column adder with autocomplete */}
           <div className="relative" ref={domainRef}>
             <input
@@ -510,6 +550,7 @@ export function KeywordsView(): JSX.Element {
                   const isSelected = selectedKw?.id === kw.id
                   const matchedSnippet = snippetMatchMap.get(kw.id)
                   const isSnippetMatch = !!matchedSnippet
+                  const featuredType = featuredSnippetMap.get(kw.id)
                   return (
                     <tr
                       key={kw.id}
@@ -536,6 +577,14 @@ export function KeywordsView(): JSX.Element {
                           </span>
                         )}
                         {kw.keyword}
+                        {featuredType && (
+                          <span
+                            className="ml-2 inline-block align-middle text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide bg-purple-100 text-purple-700 border border-purple-200"
+                            title={featuredType === 'answer_box' ? 'Answer Box' : 'Featured Snippet'}
+                          >
+                            {featuredType === 'answer_box' ? 'AB' : 'FS'}
+                          </span>
+                        )}
                         {isSnippetMatch && (
                           <span
                             className="ml-2 inline-block max-w-[200px] truncate align-middle text-[10px] text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 cursor-default"

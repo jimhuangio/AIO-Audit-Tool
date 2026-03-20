@@ -32,6 +32,7 @@ import {
   getCrawledPageRows,
   getSnippetMatchesForKeyword,
   getKeywordsMatchingSnippet,
+  getFeaturedSnippetKeywordIds,
   getClusterableKeywords,
   clearTopics,
   clearProjectData,
@@ -421,6 +422,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('keywords:snippetSearch', (_e, term: string) => {
     return getKeywordsMatchingSnippet(term)
+  })
+
+  ipcMain.handle('keywords:featuredSnippets', () => {
+    return getFeaturedSnippetKeywordIds()
   })
 
   // ─── Topics ───────────────────────────────────────────────────────────────

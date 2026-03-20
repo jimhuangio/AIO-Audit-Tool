@@ -582,6 +582,22 @@ export function getChildKeywordsFor(parentId: number): ChildKeywordRow[] {
     .all(parentId) as ChildKeywordRow[]
 }
 
+// Scans stored raw SERP JSON for featured_snippet / answer_box items.
+// Returns one row per keyword that has either type in its SERP response.
+export function getFeaturedSnippetKeywordIds(): { keywordId: number; snippetType: string }[] {
+  return getDB().prepare(
+    `SELECT keyword_id AS keywordId,
+            CASE
+              WHEN raw_json LIKE '%"type":"answer_box"%'       THEN 'answer_box'
+              ELSE 'featured_snippet'
+            END AS snippetType
+     FROM serp_results
+     WHERE result_type = 'serp_advanced'
+       AND (raw_json LIKE '%"type":"featured_snippet"%'
+            OR raw_json LIKE '%"type":"answer_box"%')`
+  ).all() as { keywordId: number; snippetType: string }[]
+}
+
 export function getSerpResultRaw(keywordId: number, resultType: string): string | null {
   const row = getDB()
     .prepare(`SELECT raw_json FROM serp_results WHERE keyword_id = ? AND result_type = ? LIMIT 1`)

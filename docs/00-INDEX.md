@@ -33,6 +33,19 @@ Post-P4 (Organic Rankings)  █████████████████�
 Phase 5 (Polish/iOS)        ░░░░░░░░░░░░░░░░░░░░   0%  🔲 Next
 ```
 
+**Recent additions (Post-Phase 4 — Analysis & UX):**
+- Scrapling tier-2 crawler: Python `StealthySession` sidecar on `localhost:11236`; spawned lazily, signals `scrapling-ready:` on stdout; three-tier crawl order: direct fetch → Scrapling → Firecrawl
+- In-app Scrapling installer in SetupView: status badges, Check Status / Install Scrapling / Install Browsers buttons, live output display
+- Topic keyword expand/collapse: `TopicRow` expands inline showing Keyword, Volume/mo, Intent, AIO Depth, AIO Count columns; data loaded lazily from existing DB
+- Keywords view — AIO snippet brand filter: scans `aio_sources.aio_snippet` with LIKE; matching rows highlighted amber
+- Keywords view — intent dropdown filter (All/informational/commercial/transactional/navigational)
+- Keywords view — min volume filter (numeric input)
+- Keywords view — featured snippet filter: `FS · No AIO` mode surfaces keywords with a featured snippet/answer box but no AI Overview — highest-probability AIO conversion targets; `FS`/`AB` badges on rows
+- Column renames: "Depth" → "AIO Depth", "AIO Results" → "AIO Count" (both Keywords view and Topics expand)
+- Report improvements: keywords & search volume table with Keyword/Volume/mo/Intent columns; HTML element explanation callout (context-specific text for h1/h2/h3/p/li/blockquote)
+- Brief improvements: keywords + search volume table sorted by volume desc
+- Competitive research: `docs/11-geo-aeo-research.md` — analysis of geo-aeo-tracker with 11 prioritised feature suggestions
+
 **Recent additions (Post-Phase 4 — Organic Rankings):**
 - `organic_rankings` table (schema v11 migration) — stores one row per organic SERP result per keyword
 - Organic results extracted from DataForSEO `type: 'organic'` items using `rank_absolute` position (1–100)
@@ -83,6 +96,8 @@ Phase 5 (Polish/iOS)        ░░░░░░░░░░░░░░░░░�
 10. **Query-per-run meta cache** — `getProjectMeta()` fetched once at run start, not per keyword
 11. **CTE + window functions in getTopics** — pre-aggregates domain stats once instead of 4 correlated subqueries per topic row
 12. **`organic_rankings` table (schema v11)** — one row per organic SERP result per keyword; `rank_absolute` as position; same domain-parsing helpers as `aio_sources`; CSV export always includes both AIO + organic columns
+13. **Three-tier crawler** — direct `undici` fetch (Tier 1) → Scrapling Python sidecar (Tier 2) → Firecrawl cloud API (Tier 3); each tier attempted sequentially on failure
+14. **Featured snippet detection** — SQLite LIKE scan on `serp_results.raw_json` for `"type":"featured_snippet"` / `"type":"answer_box"`; zero schema change; `FS · No AIO` filter = keywords with FS but no AIO citation
 
 ---
 
